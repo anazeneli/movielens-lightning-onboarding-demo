@@ -15,7 +15,7 @@ import urllib.request
 import zipfile
 
 DATA_URL = "https://files.grouplens.org/datasets/movielens/ml-100k.zip"
-RAW_DIR = os.environ.get("MOVIELENS_DATA_DIR", "/teamspace/lightning_storage/data/ml-100k")
+RAW_DIR = os.environ.get("MOVIELENS_DATA_DIR", "/teamspace/lightning_storage/ml-100k")
 
 
 def main():

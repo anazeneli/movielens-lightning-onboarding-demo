@@ -32,8 +32,26 @@ python training/sweep_launcher.py
 `recsys/movielens_datamodule.py` streams training data with
 [LitData](https://github.com/Lightning-AI/litData/tree/main)'s
 `StreamingDataset` / `StreamingDataLoader`, reading from a LitData-optimized copy of the ratings on
-the shared drive (`/teamspace/lightning_storage/data/ml-100k-litdata`, built by
+the shared drive (`/teamspace/lightning_storage/ml-100k/ml-100k-optimized`, built by
 `optimize_data.py` from the raw files in `.../ml-100k`).
+
+### Changing the shared-drive root
+
+The raw and optimized data paths are each hardcoded as a default in **three
+places**, since there's no shared config module -- change all three together
+or the scripts drift apart silently:
+
+| Env var | Default | Set in | Read in |
+|---|---|---|---|
+| `MOVIELENS_DATA_DIR` | `/teamspace/lightning_storage/ml-100k` | `fetch_data.py` | `fetch_data.py`, `optimize_data.py` (`RAW_DIR`) |
+| `MOVIELENS_LITDATA_DIR` | `/teamspace/lightning_storage/ml-100k/ml-100k-optimized` | `optimize_data.py` (`OUT_DIR`) | `optimize_data.py`, `recsys/movielens_datamodule.py` (`DATA_ROOT`) |
+
+Both defaults must resolve to a path *inside* one of the shared drive's
+mounted subfolders (e.g. `ml-100k/...`) -- `/teamspace/lightning_storage/`
+itself is not writable by the studio user, only its mounted subfolders are.
+Writing to it silently hangs `optimize_data.py` instead of raising (the
+worker subprocess dies without reporting an error, and the main process
+blocks forever waiting on it).
 
 > **⚠️ This is demonstrational, not necessary for this dataset.** MovieLens
 > 100K is 100K rows — it fits in memory easily, and a plain pandas

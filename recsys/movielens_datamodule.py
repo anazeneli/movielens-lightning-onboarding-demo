@@ -8,7 +8,7 @@ from lightning.pytorch import LightningDataModule
 # The LitData-optimized dataset lives on the shared teamspace drive, so every
 # machine in the teamspace (including remote job machines) streams it from the
 # same mount. Build it once with `python training/optimize_data.py`.
-DATA_ROOT = os.environ.get("MOVIELENS_LITDATA_DIR", "/teamspace/lightning_storage/data/ml-100k-litdata")
+DATA_ROOT = os.environ.get("MOVIELENS_LITDATA_DIR", "/teamspace/lightning_storage/ml-100k/ml-100k-optimized")
 
 
 def _collate(samples):
