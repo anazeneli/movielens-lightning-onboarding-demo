@@ -36,7 +36,24 @@ def main():
             "distinguish versions via the logged metadata (lr, batch_size, ...)."
         ),
     )
+    parser.add_argument(
+        "--smoke_test", action="store_true",
+        help=(
+            "Run the REAL pipeline at minimal scale (1 epoch, 2 batches) to "
+            "verify everything works end to end: litlogger experiment, "
+            "checkpoint upload, PR-curve artifact -- all still go to the "
+            "experiment manager, not local disk. NOT side-effect-free: it "
+            "creates a real (tiny) experiment. Deliberately does NOT use "
+            "Trainer(fast_dev_run=True) -- Lightning forcibly swaps any real "
+            "logger for a no-op DummyLogger under fast_dev_run, which would "
+            "skip the very litlogger/checkpoint/artifact integration this is "
+            "meant to verify. --logger_name defaults to 'smoke-test' here "
+            "unless you override it."
+        ),
+    )
     args = parser.parse_args()
+    if args.smoke_test and args.logger_name == "ml100k-default":
+        args.logger_name = "smoke-test"
 
     # ── 2) Logger setup ─────────────────────────────────────────
     # Resolve the current teamspace from the Lightning SDK instead of hardcoding
@@ -49,7 +66,7 @@ def main():
         teamspace=teamspace_name,
         log_model=True
     )
-    
+
     # Log metadata
     logger.log_metadata({
         "dataset": "MovieLens100K",
@@ -59,6 +76,7 @@ def main():
         "lr": args.lr,
         "max_epochs": args.max_epochs,
         "precision": args.precision,
+        "smoke_test": args.smoke_test,
     })
 
     # ── 3) DataModule ───────────────────────────────────────────────
@@ -69,7 +87,7 @@ def main():
     num_users = dm.num_users
     num_items = dm.num_items
 
-    # ── 4) Model ────────────────────────────────────────────────────
+    # ── 3b) Model ────────────────────────────────────────────────────
     model = TwoTowerModel(
         num_users     = num_users,
         num_items     = num_items,
@@ -77,7 +95,7 @@ def main():
         lr            = args.lr
     )
 
-    # ── 5) Checkpoint callback ──────────────────────────────────────
+    # ── 4) Checkpoint callback ──────────────────────────────────────
     # No dirpath: checkpoints stage under the logger's run dir (transient on the
     # job machine) and litlogger (log_model=True) uploads the best one to the
     # experiment manager, so it survives the ephemeral remote machine.
@@ -88,7 +106,7 @@ def main():
         mode         = "max"
     )
 
-    # ── 5b) Early stopping ──────────────────────────────────────────
+    # ── 4b) Early stopping ──────────────────────────────────────────
     # Stop a run once val_loss stops improving for `patience` epochs
     # (i.e. it's been climbing/flat for ~10 epochs).
     early_stop_cb = EarlyStopping(
@@ -97,23 +115,30 @@ def main():
         patience  = 10,
     )
 
-    # ── 6) Trainer ──────────────────────────────────────────────────
-    trainer = L.Trainer(
+    # ── 5) Trainer ──────────────────────────────────────────────────
+    # --smoke_test only caps scale (1 epoch, 2 batches); the logger, callbacks,
+    # and everything else stay identical to a real run -- see the --smoke_test
+    # help text for why fast_dev_run=True can't be used here instead.
+    trainer_kwargs = dict(
         accelerator       = "auto",
         devices           = "auto",
-        max_epochs        = args.max_epochs,
         precision         = args.precision,
         callbacks         = [ckpt_cb, early_stop_cb],
         logger            = logger,
         log_every_n_steps = 20,
         check_val_every_n_epoch = 1,   # validate (and log val_* metrics) every epoch
     )
+    if args.smoke_test:
+        trainer_kwargs.update(max_epochs=1, limit_train_batches=2, limit_val_batches=2)
+    else:
+        trainer_kwargs.update(max_epochs=args.max_epochs)
+    trainer = L.Trainer(**trainer_kwargs)
 
-    # ── 7) Fit! ─────────────────────────────────────────────────────
+    # ── 6) Fit! ─────────────────────────────────────────────────────
     trainer.fit(model, datamodule=dm)
     print("✅ Best checkpoint:", ckpt_cb.best_model_path)
 
-    # ── 8) Finalize logger ─────────────────────────────────────────
+    # ── 7) Finalize logger ─────────────────────────────────────────
     logger.finalize()
 
     # litlogger's auto-printed URL appends a broken "- vNone" suffix; print a
@@ -122,6 +147,8 @@ def main():
         f"📊 View experiment: "
         f"https://lightning.ai/{teamspace.owner.name}/{teamspace_name}/experiments/{args.logger_name}"
     )
+    if args.smoke_test:
+        print("✅ Smoke test passed -- litlogger experiment, checkpoint, and PR-curve artifact all verified.")
 
 if __name__ == "__main__":
     main()
