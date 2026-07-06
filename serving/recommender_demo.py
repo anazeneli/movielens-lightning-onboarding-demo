@@ -2,9 +2,9 @@ import os
 import torch
 import pandas as pd
 from recsys.model import TwoTowerModel
+from recsys.constants import RAW_DATA_DIR as DATA_DIR
 
 # 1) Load MovieLens item metadata from the shared teamspace drive
-DATA_DIR = os.environ.get("MOVIELENS_DATA_DIR", "/teamspace/lightning_storage/data/ml-100k")
 item_cols = ["movie_id","title","release_date","video_release_date","IMDb_URL",
              "unknown","Action","Adventure","Animation","Children","Comedy","Crime",
              "Documentary","Drama","Fantasy","Film-Noir","Horror","Musical","Mystery",

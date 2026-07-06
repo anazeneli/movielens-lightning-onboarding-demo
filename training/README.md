@@ -37,14 +37,16 @@ the shared drive (`/teamspace/lightning_storage/ml-100k/ml-100k-optimized`, buil
 
 ### Changing the shared-drive root
 
-The raw and optimized data paths are each hardcoded as a default in **three
-places**, since there's no shared config module -- change all three together
-or the scripts drift apart silently:
+`RAW_DATA_DIR` / `LITDATA_DIR` are defined once in `recsys/constants.py` and
+imported by every script that needs them (`fetch_data.py`, `optimize_data.py`,
+`movielens_datamodule.py`, `serving/server.py`, `serving/recommender_demo.py`)
+-- change the root there and it takes effect everywhere. `MOVIELENS_DATA_DIR`
+/ `MOVIELENS_LITDATA_DIR` env vars override each path without editing code.
 
-| Env var | Default | Set in | Read in |
-|---|---|---|---|
-| `MOVIELENS_DATA_DIR` | `/teamspace/lightning_storage/ml-100k` | `fetch_data.py` | `fetch_data.py`, `optimize_data.py` (`RAW_DIR`) |
-| `MOVIELENS_LITDATA_DIR` | `/teamspace/lightning_storage/ml-100k/ml-100k-optimized` | `optimize_data.py` (`OUT_DIR`) | `optimize_data.py`, `recsys/movielens_datamodule.py` (`DATA_ROOT`) |
+| Constant | Env var override | Default |
+|---|---|---|
+| `RAW_DATA_DIR` | `MOVIELENS_DATA_DIR` | `/teamspace/lightning_storage/ml-100k` |
+| `LITDATA_DIR` | `MOVIELENS_LITDATA_DIR` | `<RAW_DATA_DIR>/ml-100k-optimized` |
 
 Both defaults must resolve to a path *inside* one of the shared drive's
 mounted subfolders (e.g. `ml-100k/...`) -- `/teamspace/lightning_storage/`

@@ -14,8 +14,7 @@ import os, json
 import pandas as pd
 from litdata import optimize
 
-RAW_DIR = os.environ.get("MOVIELENS_DATA_DIR", "/teamspace/lightning_storage/ml-100k")
-OUT_DIR = os.environ.get("MOVIELENS_LITDATA_DIR", "/teamspace/lightning_storage/ml-100k/ml-100k-optimized")
+from recsys.constants import RAW_DATA_DIR as RAW_DIR, LITDATA_DIR as OUT_DIR
 
 
 def to_sample(row):

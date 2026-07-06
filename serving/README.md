@@ -16,15 +16,20 @@ python serving/server.py          # start the API
 streamlit run serving/app.py      # start the UI (in another terminal)
 ```
 
-## ⚠️ Checkpoint source
+## Checkpoint source
 
-`server.py` and `recommender_demo.py` currently reference local checkpoint paths
-that no longer exist (`~/my-models/...`, `checkpoints/...`). Since checkpoints
-now live in the **experiment manager** (see [`training/README.md`](../training/README.md)),
-these should be updated to download a checkpoint first, e.g.:
+`server.py` downloads its checkpoint via `litmodels.download_model` (see
+[`training/README.md`](../training/README.md) for how checkpoints get
+uploaded there in the first place). It resolves the model name in this order:
 
-```python
-from litmodels import download_model
-ckpt = download_model("<teamspace>/<experiment-or-model-name>")
-model = TwoTowerModel.load_from_checkpoint(ckpt)
-```
+1. `CHECKPOINT_NAME` — a full `owner/teamspace/experiment_name[:version]`.
+2. `EXPERIMENT_NAME` — just an experiment name, combined with the *current*
+   teamspace (`Studio().teamspace`).
+3. Neither set — falls back to `DEFAULT_CHECKPOINT_NAME` in `server.py`, a
+   placeholder pointing at no real checkpoint. It'll fail with an explicit
+   console error telling you to set one of the above.
+
+Before picking a value for `CHECKPOINT_NAME` / `EXPERIMENT_NAME`, check your
+teamspace's **Weights Registry** in the Lightning UI (Teamspace →
+Weights Registry) to see what checkpoints/litmodels your team has already
+uploaded, and test against one of those rather than guessing a name.

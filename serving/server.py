@@ -7,30 +7,54 @@ import litserve as ls
 from litmodels import download_model
 from lightning_sdk import Studio
 from recsys.model import TwoTowerModel
+from recsys.constants import RAW_DATA_DIR
 
 def log(msg):
     print(f"[RecSysAPI] {msg}", flush=True)
+
+# Seeded demo checkpoint, fixed to its origin teamspace (owner/teamspace/experiment_name)
+# rather than the current one -- unlike EXPERIMENT_NAME, this doesn't get
+# recombined with Studio().teamspace, since it must keep pointing at whatever
+# teamspace it was trained in, regardless of which teamspace the server runs in.
+# Placeholder below -- replace with your own "owner/teamspace/experiment_name".
+DEFAULT_CHECKPOINT_NAME = "your-org/your-teamspace/your-experiment-name"
 
 def _resolve_checkpoint():
     """Locate a checkpoint uploaded by litlogger (see training/README.md).
 
     litlogger uploads checkpoints under "{owner}/{teamspace}/{experiment_name}[:version]"
     (owner/teamspace auto-resolved from Studio().teamspace). Override with
-    CHECKPOINT_NAME for a specific model/version, otherwise this resolves to
-    the latest checkpoint of EXPERIMENT_NAME (default "movielens-demo", the
-    seeded demo checkpoint -- train_movielens.py's own --logger_name default
-    is dynamic per-run, so there's no single fixed name to fall back to here).
+    CHECKPOINT_NAME for a specific model/version, or EXPERIMENT_NAME to keep the
+    current teamspace but pick a different experiment. With neither set, this
+    falls back to DEFAULT_CHECKPOINT_NAME -- the seeded demo checkpoint, which
+    only exists in the teamspace it was trained in and won't resolve in a
+    fresh teamspace (see the explicit error below).
     """
     model_name = os.environ.get("CHECKPOINT_NAME")
     if not model_name:
-        teamspace = Studio().teamspace
-        experiment_name = os.environ.get("EXPERIMENT_NAME", "movielens-demo")
-        model_name = f"{teamspace.owner.name}/{teamspace.name}/{experiment_name}"
+        experiment_name = os.environ.get("EXPERIMENT_NAME")
+        if experiment_name:
+            teamspace = Studio().teamspace
+            model_name = f"{teamspace.owner.name}/{teamspace.name}/{experiment_name}"
+        else:
+            model_name = DEFAULT_CHECKPOINT_NAME
 
     download_dir = os.environ.get("CHECKPOINT_DOWNLOAD_DIR", "/tmp/recsys-checkpoints")
     os.makedirs(download_dir, exist_ok=True)
     log(f"downloading checkpoint '{model_name}' -> {download_dir}")
-    result = download_model(model_name, download_dir=download_dir)
+    try:
+        result = download_model(model_name, download_dir=download_dir)
+    except Exception as e:
+        log(f"ERROR: could not download checkpoint '{model_name}': {e}")
+        if model_name == DEFAULT_CHECKPOINT_NAME:
+            log(
+                "This is the seeded demo checkpoint, fixed to the teamspace it was "
+                "trained in -- it will not exist in a new/different teamspace. Set "
+                "CHECKPOINT_NAME (full 'owner/teamspace/experiment[:version]') or "
+                "EXPERIMENT_NAME (an experiment in *this* teamspace) to point at a "
+                "checkpoint that actually exists here."
+            )
+        raise
     # download_model's docstring promises an absolute path, but in practice it
     # returns just the filename(s) relative to download_dir -- resolve against
     # download_dir rather than trusting the value is already absolute.
@@ -67,7 +91,7 @@ class RecSysAPI(ls.LitAPI):
             "Documentary","Drama","Fantasy","Film-Noir","Horror","Musical","Mystery",
             "Romance","Sci-Fi","Thriller","War","Western"
         ]
-        items_path = Path(os.environ.get("MOVIELENS_DATA_DIR", "/teamspace/lightning_storage/data/ml-100k")) / "u.item"
+        items_path = Path(RAW_DATA_DIR) / "u.item"
         if not items_path.is_file():
             log(f"WARNING: {items_path} not found. Titles will be None.")
             self.item_df = None

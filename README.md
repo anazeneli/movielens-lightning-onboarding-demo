@@ -31,10 +31,13 @@ studio's local disk, so any Studio in the teamspace already has them:
 
 | Path | What | Built by |
 |---|---|---|
-| `/teamspace/lightning_storage/data/ml-100k/` | Raw files (`u.data`, `u.item`, ...) | `training/fetch_data.py` |
-| `/teamspace/lightning_storage/data/ml-100k-litdata/` | LitData-optimized streaming chunks | `training/optimize_data.py` — an example LitData workflow (see `training/README.md` for why LitData's used on a dataset this small) |
+| `/teamspace/lightning_storage/ml-100k/` | Raw files (`u.data`, `u.item`, ...) | `training/fetch_data.py` |
+| `/teamspace/lightning_storage/ml-100k/ml-100k-optimized/` | LitData-optimized streaming chunks | `training/optimize_data.py` — an example LitData workflow (see `training/README.md` for why LitData's used on a dataset this small) |
 
-`MOVIELENS_DATA_DIR` / `MOVIELENS_LITDATA_DIR` override each path.
+Both paths are defined once in `recsys/constants.py` (`RAW_DATA_DIR` /
+`LITDATA_DIR`) and imported everywhere else that needs them -- change the
+root there, or override `MOVIELENS_DATA_DIR` / `MOVIELENS_LITDATA_DIR`, which
+take precedence over the file's defaults.
 
 **Nothing auto-downloads.** Both scripts fail fast with a clear error if their
 input is missing, rather than silently fetching data on a remote job machine.
