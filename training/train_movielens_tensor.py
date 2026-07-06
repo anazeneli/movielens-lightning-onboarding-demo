@@ -5,8 +5,6 @@ import argparse
 import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint
 from litlogger import LightningLogger
-# `recsys` resolves via the repo's editable install (`pip install -e .`) --
-# works regardless of cwd, no sys.path hack needed.
 from recsys.movielens_datamodule import MovieLens100K
 from recsys.model import TwoTowerModel
 from lightning_sdk import Studio

@@ -1,8 +1,6 @@
 import os
 import torch
 import pandas as pd
-# `recsys` resolves via the repo's editable install (`pip install -e .`) --
-# works regardless of cwd, no sys.path hack needed.
 from recsys.model import TwoTowerModel
 
 # 1) Load MovieLens item metadata from the shared teamspace drive
