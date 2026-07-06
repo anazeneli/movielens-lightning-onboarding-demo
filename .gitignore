@@ -10,7 +10,6 @@
 !.gitignore
 !.lightningignore
 !README.md
-!requirements.txt
 !recsys/
 !training/
 !serving/

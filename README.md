@@ -116,17 +116,14 @@ environment.
 ```bash
 git clone https://github.com/anazeneli/movielens-lightning-onboarding-demo
 cd movielens-lightning-onboarding-demo
-pip install -r requirements.txt            # only if anything's missing
-python training/train_movielens.py --smoke_test   # verify the pipeline works, no side effects
+python training/train_movielens.py --smoke_test   # verify the pipeline works end to end
 python training/optimize_data.py
 python training/train_movielens.py --max_epochs 5 --logger_name my-first-run
 ```
 
-Cloning only brings the git-tracked code, not the environment. Any Studio
-should already have these packages from the base image, but `requirements.txt`
-(pinned to the exact versions used in this studio) is there in case anything's
-missing — for either option, not just B. Run `--smoke_test` first either way;
-it fails fast on missing imports before you sink time into a real run.
+Cloning brings the code, not the environment — but every dependency here is
+already part of the standard Lightning Studio base image. Run `--smoke_test`
+first to confirm; if anything's missing, install it individually.
 
 No data setup needed either way: the `data` Drive is scoped to the
 **teamspace**, not any one studio, so it's already mounted and populated in
