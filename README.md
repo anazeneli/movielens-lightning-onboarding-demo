@@ -38,6 +38,9 @@ studio's local disk, so any Studio in the teamspace already has them:
 
 **Nothing auto-downloads.** Both scripts fail fast with a clear error if their
 input is missing, rather than silently fetching data on a remote job machine.
+We recommend storing even small datasets like this one on the shared drive
+rather than locally, so every Studio and remote job in the teamspace can use
+it without separate setup.
 If the raw data isn't already on the drive:
 
 ```bash
