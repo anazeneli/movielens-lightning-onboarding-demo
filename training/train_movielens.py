@@ -1,13 +1,13 @@
 # train_movielens.py
 
 import argparse
-import sys, pathlib
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root on path for `recsys`
 
 import lightning as L
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning_sdk import Studio
 from litlogger import LightningLogger
+# `recsys` resolves via the repo's editable install (`pip install -e .`) --
+# works regardless of cwd, no sys.path hack needed.
 from recsys.movielens_datamodule import MovieLens100K
 from recsys.model import TwoTowerModel
 

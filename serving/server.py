@@ -1,12 +1,13 @@
 # server.py
-import os, json, traceback, sys
+import os, json, traceback
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root on path for `recsys`
 import pandas as pd
 import torch
 import litserve as ls
 from litmodels import download_model
 from lightning_sdk import Studio
+# `recsys` resolves via the repo's editable install (`pip install -e .`) --
+# works regardless of cwd, no sys.path hack needed.
 from recsys.model import TwoTowerModel
 
 def log(msg):

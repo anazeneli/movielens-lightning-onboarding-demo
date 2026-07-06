@@ -23,8 +23,10 @@ inference API).
 | `Explainer videos/` | Walkthrough recording. |
 
 The shared code is a package so there's one source of truth for the model and
-data loading. Entry scripts in `training/` and `serving/` add the repo root to
-`sys.path` so `from recsys.model import ...` resolves regardless of where they're launched.
+data loading. It's installed in editable mode (`pip install -e .`, from the
+repo root — see `pyproject.toml`), so `from recsys.model import ...` resolves
+in `training/` and `serving/` scripts, and in the editor, without any
+`sys.path` hacks.
 
 ## Data — the shared teamspace drive
 
@@ -58,15 +60,36 @@ download landing.
 > and update `MOVIELENS_DATA_DIR` / `MOVIELENS_LITDATA_DIR` above to match —
 > don't assume either path without checking.
 
-## Train
+## Workflow
+
+The demo's full lifecycle, from a fresh clone to a served model:
+
+**1. Debug/test locally** — `train_movielens.py` (monitors `val_ap`, has
+early stopping) or `train_movielens_tensor.py` (monitors `val_acc`, no early
+stopping) both work the same way:
 
 ```bash
 python training/optimize_data.py     # one-time: build the LitData copy
 python training/train_movielens.py --lr 1e-2 --batch_size 256 --max_epochs 20
 ```
 
-Launch the lr × batch-size sweep as remote jobs, all grouped under one
-experiment so you can compare configs and pick a winner:
+**2. Smoke test locally** — same real pipeline at minimal scale (1 epoch, 2
+batches); still exercises litlogger + checkpoint + PR-curve artifact for real:
+
+```bash
+python training/train_movielens.py --smoke_test
+```
+
+**3. Smoke test the remote job path** — one job on the actual target machine,
+before spending on a full sweep (catches issues like a missing package or a
+bad working-directory assumption that only show up remotely):
+
+```bash
+python training/sweep_launcher.py --smoke_test
+```
+
+**4. Launch the full hyperparameter sweep** as remote jobs, all grouped under
+one experiment so you can compare configs side by side:
 
 ```bash
 python training/sweep_launcher.py
@@ -76,16 +99,35 @@ See [`training/README.md`](training/README.md), "Grouping experiments" for how
 that grouping works and its caveats (versions are timestamps, re-runs never
 overwrite, machine type isn't varied automatically).
 
-## Serve
+**5. Run the winning config for real** — pick the best version's `lr`/
+`batch_size` from the sweep experiment in the Lightning UI, then launch one
+longer job with those hyperparameters under its own `--logger_name`, reusing
+the same `Job.run` pattern `sweep_launcher.py` uses:
 
-```bash
-python serving/server.py          # LitServe API on :8011
-streamlit run serving/app.py      # UI that calls the API
+```python
+from lightning_sdk import Studio, Job, Machine
+import pathlib
+
+studio = Studio()
+REPO_ROOT = pathlib.Path(".").resolve()  # run from the repo root
+cmd = (
+    f"python {REPO_ROOT}/training/train_movielens.py "
+    f"--lr <best_lr> --batch_size <best_batch_size> --max_epochs 100 "
+    f"--logger_name ml100k-best"
+)
+Job.run(name="ml100k-best-full-run", machine=Machine.CPU, studio=studio, command=cmd)
 ```
 
-`server.py` pulls its checkpoint from the litlogger model registry (not a
-local path) via `EXPERIMENT_NAME` (defaults to `"ml100k-default"`). To serve
-the seeded demo checkpoint instead:
+**6. Serve the result** — `server.py` pulls its checkpoint from the litlogger
+model registry (not a local path) via `EXPERIMENT_NAME` (defaults to
+`"ml100k-default"`; set it to whatever `--logger_name` you used in step 5):
+
+```bash
+EXPERIMENT_NAME=ml100k-best python serving/server.py   # LitServe API on :8011
+streamlit run serving/app.py                            # UI that calls the API
+```
+
+To serve the seeded demo checkpoint instead of your own run:
 
 ```bash
 EXPERIMENT_NAME=movielens-demo python serving/server.py
@@ -116,6 +158,7 @@ environment.
 ```bash
 git clone https://github.com/anazeneli/movielens-lightning-onboarding-demo
 cd movielens-lightning-onboarding-demo
+pip install -e .                                  # installs `recsys` in editable mode
 python training/train_movielens.py --smoke_test   # verify the pipeline works end to end
 python training/optimize_data.py
 python training/train_movielens.py --max_epochs 5 --logger_name my-first-run
@@ -137,7 +180,8 @@ This repo is a git repo pushed to GitHub (public):
 `https://github.com/anazeneli/movielens-lightning-onboarding-demo`. Because
 the studio directory doubles as the home directory, `.gitignore` denies
 everything by default and explicitly allows only `recsys/`, `training/`,
-`serving/`, `README.md`, `.lightningignore`, and `scratch.ipynb` — so shell
+`serving/`, `README.md`, `pyproject.toml`, `.lightningignore`, and
+`scratch.ipynb` — so shell
 configs, `.ssh`, editor state, and `.claude/` session data never get
 committed (verified before making the repo public — never appeared in any
 commit).

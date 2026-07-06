@@ -9,8 +9,7 @@
 # Run once (re-run to rebuild):
 #     python training/optimize_data.py
 
-import os, sys, json, pathlib
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+import os, json
 
 import pandas as pd
 from litdata import optimize

@@ -7,18 +7,20 @@ Everything needed to train the two-tower model and run hyperparameter sweeps.
 | `optimize_data.py` | **One-time step.** Converts the raw MovieLens ratings into LitData's streamable chunk format on the shared drive. See "Data pipeline: LitData" below. |
 | `train_movielens.py` | **Main train script.** litlogger + `ModelCheckpoint` (monitors `val_ap`) + `EarlyStopping`. |
 | `train_movielens_tensor.py` | Near-duplicate variant that monitors `val_acc` and has no early stopping. |
-| `sweep_launcher.py` | Fans out a `lr × batch_size` grid as Lightning **jobs** (one H100 job per combo), grouped into one experiment. |
+| `sweep_launcher.py` | Fans out a `lr × batch_size` grid as Lightning **jobs** (`Machine.CPU` by default, swap for whatever fits your budget), grouped into one experiment. `--smoke_test` launches a single job instead of the full grid, to verify the remote path first. |
 
-First-time setup, then train locally:
+First-time setup (from the repo root), then train locally:
 
 ```bash
+pip install -e .                                                        # one-time, installs `recsys` in editable mode
 python training/optimize_data.py                                        # one-time, builds the LitData copy
 python training/train_movielens.py --lr 1e-2 --batch_size 256 --max_epochs 20
 ```
 
-Run the sweep (remote jobs):
+Run the sweep (remote jobs) -- smoke test the remote path first, then run the full grid:
 
 ```bash
+python training/sweep_launcher.py --smoke_test
 python training/sweep_launcher.py
 ```
 
@@ -121,10 +123,12 @@ survive.
 
 `--logger_name` is the experiment's name **and** its group: every run that
 passes the same `--logger_name` becomes a **version** of that one experiment,
-instead of its own separate experiment. `sweep_launcher.py` uses this — all 9
-`lr × batch_size` jobs share one `EXPERIMENT_GROUP = "ml100k-sweep"`, so they
-land as 9 versions under a single experiment you can compare side by side to
-pick the winning config.
+instead of its own separate experiment. `sweep_launcher.py` uses this — every
+`lr × batch_size` job in a grid shares one `EXPERIMENT_GROUP`, so they land as
+versions under a single experiment you can compare side by side to pick the
+winning config. The current grid (`ml100k-sweep-wide-lr`) is 15 jobs (5
+learning rates × 3 batch sizes); an earlier, narrower grid is kept commented
+out in the file for reference.
 
 A few things worth knowing about how this actually behaves:
 
@@ -139,11 +143,12 @@ A few things worth knowing about how this actually behaves:
   curves anyway, since neither the embedding init nor the data shuffling is
   seeded.
 - **Machine type isn't a sweep dimension today.** `sweep_launcher.py` launches
-  every job on the same `machine=Machine.H100`. To compare, say, a CPU run
-  against a GPU run in one group, launch jobs with different `machine=`
-  values yourself, using the same `--logger_name` for all of them.
+  every job on the same `machine=`. To compare, say, a CPU run against a GPU
+  run in one group, launch jobs with different `machine=` values yourself,
+  using the same `--logger_name` for all of them.
 
-To run this experiment group's demo: launch the sweep, open the `ml100k-sweep`
-experiment in the Lightning UI, compare the 9 versions' `val_ap` to find the
-best config, then kick off a full run of that config under its own
-`--logger_name` (e.g. `ml100k-best`).
+To run this experiment group's demo: launch the sweep, open the
+`ml100k-sweep-wide-lr` experiment in the Lightning UI, compare the versions'
+`val_ap` to find the best config, then kick off a full run of that config
+under its own `--logger_name` (e.g. `ml100k-best`) -- see the root
+[README.md](../README.md)'s "Workflow" section, step 5.
