@@ -12,11 +12,13 @@ model.py
     recall / average-precision and a precision-recall-curve artifact.
 
 movielens_datamodule.py
-    ``MovieLens100K`` — a LightningDataModule that reads the MovieLens 100K
-    ratings from the shared teamspace drive and yields train/val dataloaders.
-    Data path defaults to ``/teamspace/lightning_storage/data/ml-100k`` and can
-    be overridden with the ``MOVIELENS_DATA_DIR`` env var. ``prepare_data()``
-    fails fast if the data is missing rather than downloading silently.
+    ``MovieLens100K`` — a LightningDataModule that streams MovieLens 100K
+    ratings via LitData (``StreamingDataset`` / ``StreamingDataLoader``) from
+    a LitData-optimized copy on the shared teamspace drive. Path defaults to
+    ``/teamspace/lightning_storage/data/ml-100k-litdata`` and can be overridden
+    with the ``MOVIELENS_LITDATA_DIR`` env var. Build that optimized copy once
+    with ``python training/optimize_data.py``; ``prepare_data()`` fails fast if
+    it's missing rather than rebuilding silently.
 
 Usage
 -----

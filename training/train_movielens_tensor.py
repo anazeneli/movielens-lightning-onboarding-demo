@@ -47,9 +47,9 @@ def main():
     dm = MovieLens100K(batch_size=args.batch_size, val_split=args.val_split)
     dm.prepare_data()
     dm.setup()
-    # zero-based indices from your DataModule
-    num_users = int(dm.train_ds.dataset.df.user_idx.nunique())
-    num_items = int(dm.train_ds.dataset.df.item_idx.nunique())
+    # cardinalities exposed by the DataModule (computed over the full dataset)
+    num_users = dm.num_users
+    num_items = dm.num_items
 
     # ── 4) Model ────────────────────────────────────────────────────
     model = TwoTowerModel(

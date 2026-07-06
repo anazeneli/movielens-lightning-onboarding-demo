@@ -5,7 +5,7 @@ recommendations. All three import the model from [`recsys/`](../recsys/).
 
 | File | Purpose |
 |---|---|
-| `server.py` | **Inference API** built on [LitServe](https://lightning.ai/litserve). Loads a checkpoint, exposes `/predict` — given `user_ids` + `item_ids`, returns scored top-K items with movie titles (from `u.item` on the drive). Runs on `:8011`. |
+| `server.py` | **Inference API** built on [LitServe](https://github.com/Lightning-AI/litserve/tree/main). Loads a checkpoint, exposes `/predict` — given `user_ids` + `item_ids`, returns scored top-K items with movie titles (from `u.item` on the drive). Runs on `:8011`. |
 | `app.py` | **Streamlit UI.** The human-facing client: pick a user + K, calls the API, renders a table. Point it at the API with `INFERENCE_API_URL`. |
 | `reccomender_demo.py` | **Standalone demo** — loads a checkpoint and prints recommendations directly, no server. |
 

@@ -4,13 +4,15 @@ Everything needed to train the two-tower model and run hyperparameter sweeps.
 
 | File | Purpose |
 |---|---|
+| `optimize_data.py` | **One-time step.** Converts the raw MovieLens ratings into LitData's streamable chunk format on the shared drive. See "Data pipeline: LitData" below. |
 | `train_movielens.py` | **Main train script.** litlogger + `ModelCheckpoint` (monitors `val_ap`) + `EarlyStopping`. |
 | `train_movielens_tensor.py` | Near-duplicate variant that monitors `val_acc` and has no early stopping. |
-| `sweep_launcher.py` | Fans out a `lr × batch_size` grid as Lightning **jobs** (one H100 job per combo). |
+| `sweep_launcher.py` | Fans out a `lr × batch_size` grid as Lightning **jobs** (one H100 job per combo), grouped into one experiment. |
 
-Run locally:
+First-time setup, then train locally:
 
 ```bash
+python training/optimize_data.py                                        # one-time, builds the LitData copy
 python training/train_movielens.py --lr 1e-2 --batch_size 256 --max_epochs 20
 ```
 
@@ -20,9 +22,29 @@ Run the sweep (remote jobs):
 python training/sweep_launcher.py
 ```
 
+## Data pipeline: LitData
+
+`recsys/movielens_datamodule.py` streams training data with
+[LitData](https://github.com/Lightning-AI/litData/tree/main)'s
+`StreamingDataset` / `StreamingDataLoader`, reading from a LitData-optimized copy of the ratings on
+the shared drive (`/teamspace/lightning_storage/data/ml-100k-litdata`, built by
+`optimize_data.py` from the raw files in `.../ml-100k`).
+
+> **⚠️ This is demonstrational, not necessary for this dataset.** MovieLens
+> 100K is 100K rows — it fits in memory easily, and a plain pandas
+> `DataFrame` + `torch.utils.data.Dataset` (the original approach) works fine
+> and is simpler. LitData's real value is streaming data **that doesn't fit in
+> RAM** straight from cloud/drive storage without a full local copy — it's
+> included here to show the pattern (and the three "Lit" products — LitData /
+> LitLogger / LitServe — together), not because this dataset needs it.
+
+If you'd rather skip LitData for this dataset: revert
+`recsys/movielens_datamodule.py` to load `u.data` directly with pandas (no
+`optimize_data.py` step needed), and skip building the litdata directory.
+
 ## How we log to litlogger (the experiment manager)
 
-We use [`litlogger`](https://lightning.ai)'s `LightningLogger`, which writes to
+We use [`litlogger`](https://github.com/Lightning-AI/LitLogger/tree/main)'s `LightningLogger`, which writes to
 the teamspace **experiment manager** — **not** to local disk. Nothing
 accumulates in the studio; everything is viewable in the Lightning UI under
 *Experiments*. Here's the full flow, step by step:
@@ -77,3 +99,34 @@ metrics, checkpoints, and artifacts live in the experiment manager. That's why
 this repo has no `checkpoints/` folder and `lightning_logs/` is ignored: on a
 remote job machine the local disk is ephemeral anyway, but the uploaded results
 survive.
+
+## Grouping experiments
+
+`--logger_name` is the experiment's name **and** its group: every run that
+passes the same `--logger_name` becomes a **version** of that one experiment,
+instead of its own separate experiment. `sweep_launcher.py` uses this — all 9
+`lr × batch_size` jobs share one `EXPERIMENT_GROUP = "ml100k-sweep"`, so they
+land as 9 versions under a single experiment you can compare side by side to
+pick the winning config.
+
+A few things worth knowing about how this actually behaves:
+
+- **Versions are timestamps, not labels.** litlogger auto-generates each
+  version as the UTC time the run started — there's no way to name a version.
+  Distinguish versions using the metadata logged in step 2 above (`lr`,
+  `batch_size`, `embedding_dim`, ...), not the version string itself.
+- **Nothing is ever overwritten.** Re-running with the same `--logger_name`
+  (even with byte-identical arguments) always creates a brand new version —
+  litlogger has no notion of "this config already ran, update it in place."
+  Two runs of the same config will typically still show different metric
+  curves anyway, since neither the embedding init nor the data shuffling is
+  seeded.
+- **Machine type isn't a sweep dimension today.** `sweep_launcher.py` launches
+  every job on the same `machine=Machine.H100`. To compare, say, a CPU run
+  against a GPU run in one group, launch jobs with different `machine=`
+  values yourself, using the same `--logger_name` for all of them.
+
+To run this experiment group's demo: launch the sweep, open the `ml100k-sweep`
+experiment in the Lightning UI, compare the 9 versions' `val_ap` to find the
+best config, then kick off a full run of that config under its own
+`--logger_name` (e.g. `ml100k-best`).

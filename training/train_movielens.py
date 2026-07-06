@@ -25,7 +25,17 @@ def main():
     parser.add_argument("--max_epochs",    type=int,   default=20,   help="Number of epochs")
     parser.add_argument("--precision",     type=int,   default=32,   choices=[16,32], help="Trainer precision")
     # Logger settings
-    parser.add_argument("--logger_name",   type=str,   default="ml100k-default", help="Logger experiment name")
+    parser.add_argument(
+        "--logger_name", type=str, default="ml100k-default",
+        help=(
+            "Experiment name in the experiment manager (the 'group'). Reuse the "
+            "same name across multiple runs -- e.g. every combo in a hyperparameter "
+            "sweep -- to group them as versions of ONE experiment instead of "
+            "creating a separate experiment per run. Each run still gets its own "
+            "timestamped version, so re-running never overwrites a prior one; "
+            "distinguish versions via the logged metadata (lr, batch_size, ...)."
+        ),
+    )
     args = parser.parse_args()
 
     # ── 2) Logger setup ─────────────────────────────────────────

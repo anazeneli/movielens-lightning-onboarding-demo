@@ -26,7 +26,8 @@
 .bower
 
 # ── Heavy / regenerable artifacts (excluded from studio duplicate & share) ──
-# Dataset now lives on the shared teamspace drive at /teamspace/data/ml-100k
+# Dataset now lives on the shared teamspace drive at
+# /teamspace/lightning_storage/data/ml-100k (raw) and .../ml-100k-litdata (optimized)
 ml-100k
 # Training outputs — checkpoints & artifacts live in the experiment manager (litlogger)
 checkpoints
