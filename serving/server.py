@@ -6,8 +6,6 @@ import torch
 import litserve as ls
 from litmodels import download_model
 from lightning_sdk import Studio
-# `recsys` resolves via the repo's editable install (`pip install -e .`) --
-# works regardless of cwd, no sys.path hack needed.
 from recsys.model import TwoTowerModel
 
 def log(msg):
@@ -19,12 +17,14 @@ def _resolve_checkpoint():
     litlogger uploads checkpoints under "{owner}/{teamspace}/{experiment_name}[:version]"
     (owner/teamspace auto-resolved from Studio().teamspace). Override with
     CHECKPOINT_NAME for a specific model/version, otherwise this resolves to
-    the latest checkpoint of EXPERIMENT_NAME (default "ml100k-default").
+    the latest checkpoint of EXPERIMENT_NAME (default "movielens-demo", the
+    seeded demo checkpoint -- train_movielens.py's own --logger_name default
+    is dynamic per-run, so there's no single fixed name to fall back to here).
     """
     model_name = os.environ.get("CHECKPOINT_NAME")
     if not model_name:
         teamspace = Studio().teamspace
-        experiment_name = os.environ.get("EXPERIMENT_NAME", "ml100k-default")
+        experiment_name = os.environ.get("EXPERIMENT_NAME", "movielens-demo")
         model_name = f"{teamspace.owner.name}/{teamspace.name}/{experiment_name}"
 
     download_dir = os.environ.get("CHECKPOINT_DOWNLOAD_DIR", "/tmp/recsys-checkpoints")
@@ -53,7 +53,10 @@ class RecSysAPI(ls.LitAPI):
         log(f"ckpt path -> {ckpt}")
         if not ckpt.is_file():
             raise FileNotFoundError(f"Missing ckpt: {ckpt}")
-        self.model = TwoTowerModel.load_from_checkpoint(str(ckpt))
+        # weights_only=False: PyTorch >=2.6 defaults torch.load to weights_only=True,
+        # which rejects this checkpoint's pickled numpy globals. Safe here -- it's
+        # our own litmodels-registered checkpoint, not an untrusted external file.
+        self.model = TwoTowerModel.load_from_checkpoint(str(ckpt), weights_only=False)
         self.model.eval().to(device)
         log(f"model device -> {next(self.model.parameters()).device}")
 
