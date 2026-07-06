@@ -83,9 +83,16 @@ python serving/server.py          # LitServe API on :8011
 streamlit run serving/app.py      # UI that calls the API
 ```
 
-> Note: the serving scripts currently load a checkpoint from a local path that
-> no longer exists — point them at a checkpoint pulled from the experiment
-> manager before running inference. See [`serving/README.md`](serving/README.md).
+`server.py` pulls its checkpoint from the litlogger model registry (not a
+local path) via `EXPERIMENT_NAME` (defaults to `"ml100k-default"`). To serve
+the seeded demo checkpoint instead:
+
+```bash
+EXPERIMENT_NAME=movielens-demo python serving/server.py
+```
+
+See [`serving/README.md`](serving/README.md) for the full checkpoint
+resolution details.
 
 ## Checkpoints & artifacts — nothing is kept in the studio
 
@@ -93,11 +100,41 @@ See [`training/README.md`](training/README.md) for how logging to **litlogger**
 works. In short: checkpoints and artifacts are uploaded to the **experiment
 manager**, not stored locally, which keeps the studio lean.
 
+## Onboarding: two ways to get this into a new Studio
+
+Both work within your teamspace; pick whichever fits. (Duplicating into a
+*different* teamspace than this one may need an admin to enable that.)
+
+**Option A — Duplicate this Studio** (Lightning's native feature): Studio →
+⋮ menu → Duplicate.
+
+**Option B — Clone the repo into a Studio.** Public at
+`https://github.com/anazeneli/movielens-lightning-onboarding-demo`:
+
+```bash
+git clone https://github.com/anazeneli/movielens-lightning-onboarding-demo
+cd movielens-lightning-onboarding-demo
+python training/optimize_data.py
+python training/train_movielens.py --max_epochs 5 --logger_name my-first-run
+```
+
+No data setup needed either way: the `data` Drive is scoped to the
+**teamspace**, not any one studio, so it's already mounted and populated in
+any Studio in the same teamspace. In a *different* teamspace, `prepare_data()`
+fails fast with a clear message instead of silently downloading — see "Data"
+above.
+
+Dependencies (`lightning`, `litdata`, `litlogger`, `litmodels`, `litserve`,
+`torch`, `torchmetrics`, `pandas`, `matplotlib`, `streamlit`) are the standard
+Lightning Studio image and should already be present.
+
 ## Version control
 
-This repo is a local git repo (`git log` to see history). Because the studio
-directory doubles as the home directory, `.gitignore` denies everything by
-default and explicitly allows only `recsys/`, `training/`, `serving/`,
-`README.md`, and `.lightningignore` — so shell configs, `.ssh`, editor state,
-and `.claude/` session data never get committed. There's no remote configured;
-this history exists only in this studio unless you push it somewhere.
+This repo is a git repo pushed to GitHub (public):
+`https://github.com/anazeneli/movielens-lightning-onboarding-demo`. Because
+the studio directory doubles as the home directory, `.gitignore` denies
+everything by default and explicitly allows only `recsys/`, `training/`,
+`serving/`, `README.md`, `.lightningignore`, and `scratch.ipynb` — so shell
+configs, `.ssh`, editor state, and `.claude/` session data never get
+committed (verified before making the repo public — never appeared in any
+commit).
