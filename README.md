@@ -50,7 +50,13 @@ download landing.
 > [`training/README.md`](training/README.md) for how to skip it.
 
 > The drive itself was created with `Teamspace().new_folder("data")` (or via
-> the UI: Teamspace → Drives → New folder).
+> the UI: Teamspace → Drives → New folder). **Its mount path isn't
+> guaranteed** — `new_folder`'s own docstring claims `/teamspace/folders/data`,
+> but in this environment it actually mounted at
+> `/teamspace/lightning_storage/data`. If you set this up fresh, confirm your
+> own mount path (`ls /teamspace/lightning_storage` after creating the drive)
+> and update `MOVIELENS_DATA_DIR` / `MOVIELENS_LITDATA_DIR` above to match —
+> don't assume either path without checking.
 
 ## Train
 

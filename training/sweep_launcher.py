@@ -38,11 +38,13 @@ for idx, (lr, bs) in enumerate(grid):
     # Launch from current machine as default
     # job_plugin.run(command=cmd, name=job_name)  # type: ignore[call-arg]
 
-    # Specify machine to launch experiment jobs from
+    # This launches len(learning_rates) * len(batch_sizes) billed remote jobs —
+    # set `machine=` to whatever fits your workload/budget (H100 here is just
+    # this repo's default, not a requirement).
     job_plugin.run(command=cmd, machine=Machine.H100, name=job_name)  # type: ignore[call-arg]
 
     print(f"Launched {job_name} → `{cmd}`")
 
-print(f"\nAll 9 runs grouped under experiment '{EXPERIMENT_GROUP}' -- compare their "
+print(f"\nAll {len(grid)} runs grouped under experiment '{EXPERIMENT_GROUP}' -- compare their "
       f"versions in the experiment manager to pick the best config, then run that "
       f"config's full training with its own --logger_name.")

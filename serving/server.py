@@ -5,16 +5,50 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root on pat
 import pandas as pd
 import torch
 import litserve as ls
+from litmodels import download_model
+from lightning_sdk import Studio
 from recsys.model import TwoTowerModel
 
 def log(msg):
     print(f"[RecSysAPI] {msg}", flush=True)
 
+def _resolve_checkpoint():
+    """Locate a checkpoint uploaded by litlogger (see training/README.md).
+
+    litlogger uploads checkpoints under "{owner}/{teamspace}/{experiment_name}[:version]"
+    (owner/teamspace auto-resolved from Studio().teamspace). Override with
+    CHECKPOINT_NAME for a specific model/version, otherwise this resolves to
+    the latest checkpoint of EXPERIMENT_NAME (default "ml100k-default").
+    """
+    model_name = os.environ.get("CHECKPOINT_NAME")
+    if not model_name:
+        teamspace = Studio().teamspace
+        experiment_name = os.environ.get("EXPERIMENT_NAME", "ml100k-default")
+        model_name = f"{teamspace.owner.name}/{teamspace.name}/{experiment_name}"
+
+    download_dir = os.environ.get("CHECKPOINT_DOWNLOAD_DIR", "/tmp/recsys-checkpoints")
+    os.makedirs(download_dir, exist_ok=True)
+    log(f"downloading checkpoint '{model_name}' -> {download_dir}")
+    result = download_model(model_name, download_dir=download_dir)
+    # download_model's docstring promises an absolute path, but in practice it
+    # returns just the filename(s) relative to download_dir -- resolve against
+    # download_dir rather than trusting the value is already absolute.
+    names = result if isinstance(result, list) else [result]
+    path = Path(names[0])
+    if not path.is_absolute():
+        path = Path(download_dir) / path
+    if path.is_dir():
+        ckpts = sorted(path.glob("*.ckpt"))
+        if not ckpts:
+            raise FileNotFoundError(f"No .ckpt file found in downloaded model dir {path}")
+        path = ckpts[-1]
+    return path
+
 class RecSysAPI(ls.LitAPI):
     def setup(self, device):
         log("setup()")
-        # 1) Load checkpoint
-        ckpt = Path(os.path.expanduser("~/my-models/ml100k-epoch=19-val_acc=0.61.ckpt"))
+        # 1) Load checkpoint (downloaded from the experiment manager, not local disk)
+        ckpt = _resolve_checkpoint()
         log(f"ckpt path -> {ckpt}")
         if not ckpt.is_file():
             raise FileNotFoundError(f"Missing ckpt: {ckpt}")

@@ -80,6 +80,23 @@ is deferred until `finalize()` (step 6). We deliberately set **no `dirpath`** on
 lands in a persisted `checkpoints/` folder — the uploaded copy is the source of
 truth. Pull it back later with `litmodels.download_model`.
 
+Verified with a real run (`--logger_name smoke-test`, 2 epochs): only one file
+was uploaded — the single best-`val_ap` checkpoint, not one per epoch — and
+`litmodels.download_model` retrieved it back successfully. Two things worth
+knowing, found only by actually doing this (not documented upstream):
+
+- **Model name format:** `download_model`/`upload_model` key checkpoints as
+  `{owner}/{teamspace}/{experiment_name}[:version]` (e.g.
+  `lightning-ai/mle-demo/smoke-test`). This comes from reading litlogger's
+  `ModelArtifact` class, not from any docstring.
+- **`download_model`'s return value is not what its docstring says.** It
+  claims to return "the absolute path to the downloaded model file," but in
+  practice it returns just the bare filename(s) (e.g.
+  `['ml100k-epoch=01-val_ap=0.57.ckpt']`), relative to `download_dir`. See
+  `serving/server.py`'s `_resolve_checkpoint()` for the defensive handling
+  this requires (join against `download_dir` rather than trusting the result
+  is absolute).
+
 **5. Log file artifacts.** The PR-curve plot in `recsys/model.py` is uploaded as
 a file artifact:
 ```python
