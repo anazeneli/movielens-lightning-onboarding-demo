@@ -4,15 +4,18 @@ Everything needed to train the two-tower model and run hyperparameter sweeps.
 
 | File | Purpose |
 |---|---|
+| `fetch_data.py` | **One-time step.** Downloads the raw MovieLens 100K files to the shared drive -- but only if they're not already there. |
 | `optimize_data.py` | **One-time step.** Converts the raw MovieLens ratings into LitData's streamable chunk format on the shared drive. See "Data pipeline: LitData" below. |
 | `train_movielens.py` | **Main train script.** litlogger + `ModelCheckpoint` (monitors `val_ap`) + `EarlyStopping`. |
 | `train_movielens_tensor.py` | Near-duplicate variant that monitors `val_acc` and has no early stopping. |
-| `sweep_launcher.py` | Fans out a `lr × batch_size` grid as Lightning **jobs** (`Machine.CPU` by default, swap for whatever fits your budget), grouped into one experiment. `--smoke_test` launches a single job instead of the full grid, to verify the remote path first. |
+| `sweep_launcher.py` | Fans out a `lr × batch_size` grid as Lightning **jobs** (`Machine.CPU` by default, swap for whatever fits your budget); each job is its own experiment, grouped into one folder in the experiment manager (see "Grouping experiments" below). `--smoke_test` launches a single job instead of the full grid, to verify the remote path first. |
+| `launch_job.py` | Launches a **single** remote job running `train_movielens.py` with whatever hyperparameters you give it -- e.g. a longer run on a sweep's winning config. Anchored to its own file location, so it works from any cwd (unlike a one-off `Path(".").resolve()` snippet). |
 
 First-time setup (from the repo root), then train locally:
 
 ```bash
 pip install -e .                                                        # one-time, installs `recsys` in editable mode
+python training/fetch_data.py                                           # one-time, only downloads if not already on the shared drive
 python training/optimize_data.py                                        # one-time, builds the LitData copy
 python training/train_movielens.py --lr 1e-2 --batch_size 256 --max_epochs 20
 ```
@@ -121,34 +124,71 @@ survive.
 
 ## Grouping experiments
 
-`--logger_name` is the experiment's name **and** its group: every run that
-passes the same `--logger_name` becomes a **version** of that one experiment,
-instead of its own separate experiment. `sweep_launcher.py` uses this — every
-`lr × batch_size` job in a grid shares one `EXPERIMENT_GROUP`, so they land as
-versions under a single experiment you can compare side by side to pick the
-winning config. The current grid (`ml100k-sweep-wide-lr`) is 15 jobs (5
-learning rates × 3 batch sizes); an earlier, narrower grid is kept commented
-out in the file for reference.
+litlogger's public API only documents a flat `name` -- no `folder`/`group`
+parameter. But a **slash-delimited `--logger_name` creates real folder
+hierarchy in the Lightning experiment manager UI** (confirmed by testing;
+undocumented). `sweep_launcher.py` uses this to group every job in a sweep
+under one folder:
 
-A few things worth knowing about how this actually behaves:
+```text
+--logger_name = {project}/{workflow}/{experiment_group}/{experiment_name}
+       example = ml-100k/train_movielens/20260706-192010/sweep-lr0.01-bs256
+```
 
-- **Versions are timestamps, not labels.** litlogger auto-generates each
-  version as the UTC time the run started — there's no way to name a version.
-  Distinguish versions using the metadata logged in step 2 above (`lr`,
-  `batch_size`, `embedding_dim`, ...), not the version string itself.
-- **Nothing is ever overwritten.** Re-running with the same `--logger_name`
-  (even with byte-identical arguments) always creates a brand new version —
-  litlogger has no notion of "this config already ran, update it in place."
-  Two runs of the same config will typically still show different metric
-  curves anyway, since neither the embedding init nor the data shuffling is
-  seeded.
+| Segment | Flag | Meaning | Example |
+|---|---|---|---|
+| Project | `--project` | The broader body of work. | `ml-100k` |
+| Workflow | `--workflow` | The repeatable code path (provenance, not a visible grouping tier on its own -- see the root README). | `train_movielens` |
+| Experiment group | `--experiment_group` | One sweep -- all jobs from one `sweep_launcher.py` invocation share this (it's just the `sweep_id`). | `20260706-192010` |
+| Experiment | `--experiment_name` | This one job's config. | `sweep-lr0.01-bs256` |
+
+Every field is *also* logged as metadata (along with `--sweep_id`, `lr`,
+`batch_size`, ...), so it's filterable/searchable even without relying on the
+folder view.
+
+**Responsibility split:**
+- `train_movielens.py` owns one experiment -- its own config, metrics,
+  checkpoint, artifacts. It never hardcodes what it belongs to: `--project`
+  (default `ml-100k`), `--workflow` (default `train_movielens`),
+  `--experiment_group`, `--experiment_name`, and `--sweep_id` (all default to
+  `""`, unset) are just logged as metadata, whatever they're set to. If
+  `--logger_name` isn't given either, it defaults to a flat
+  `run-lr<lr>-bs<batch_size>` (or `run-smoke-test` for `--smoke_test`) -- no
+  folder, since a standalone run has no experiment group.
+  **It has no dependency on `sweep_launcher.py`** -- no import, no requirement
+  that it's running -- so it's a complete, standalone experiment either way.
+- `sweep_launcher.py` owns the grouping: it generates one `sweep_id` per
+  invocation (a timestamp) and a unique `--experiment_name` per job (`sweep-
+  lr<lr>-bs<batch_size>` -- every lr/batch_size combo in the grid is unique, so
+  this alone is unique within the group), builds the slash-delimited
+  `--logger_name` from `project`/`workflow`/`experiment_group`/`experiment_name`,
+  and passes all of it down as plain CLI args -- the only thing connecting the
+  two scripts.
+
+A few things worth knowing:
+
+- **Naming convention:** `sweep-*` for anything launched by
+  `sweep_launcher.py`, `run-*` for standalone `train_movielens.py` runs. Job
+  names (the Lightning **Jobs** UI, a separate system from experiments) stay
+  dash-only and are never used as a `--logger_name`.
+- **Nothing is ever overwritten.** litlogger does a strict get-or-create keyed
+  on the full `--logger_name` string -- reusing one exactly reuses the *same*
+  experiment (metrics/steps from different runs collide in it), so every job's
+  `--logger_name` must be unique. Confirmed this the hard way: an earlier
+  attempt at reusing one flat name across a sweep just overwrote itself
+  instead of creating separate comparable runs.
 - **Machine type isn't a sweep dimension today.** `sweep_launcher.py` launches
-  every job on the same `machine=`. To compare, say, a CPU run against a GPU
-  run in one group, launch jobs with different `machine=` values yourself,
-  using the same `--logger_name` for all of them.
+  every job on the same `machine=`. To compare a CPU run against a GPU run,
+  launch jobs with different `machine=` values yourself, keeping the same
+  `experiment_group`.
+- **Local/standalone runs** default to `experiment_group=""` -- a real
+  experiment, just not part of a sweep folder.
+- **Smoke tests** get their own `experiment_group` (a fresh timestamp for
+  `sweep_launcher.py --smoke_test`, so repeated smoke tests don't collide) and
+  `run-smoke-test` for direct local smoke tests.
 
-To run this experiment group's demo: launch the sweep, open the
-`ml100k-sweep-wide-lr` experiment in the Lightning UI, compare the versions'
-`val_ap` to find the best config, then kick off a full run of that config
-under its own `--logger_name` (e.g. `ml100k-best`) -- see the root
-[README.md](../README.md)'s "Workflow" section, step 5.
+To run this sweep's demo: launch it, open the printed
+`ml-100k/train_movielens/<experiment_group>/` folder in the experiment
+manager, compare the jobs' `val_ap` to find the best config, then kick off a
+full run of that config under its own `--logger_name` (e.g. `ml100k-best`) --
+see the root [README.md](../README.md)'s "Workflow" section, step 5.
