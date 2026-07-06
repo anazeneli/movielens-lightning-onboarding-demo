@@ -1,14 +1,22 @@
 # sweep_launcher.py
 #
-# Launches a lr x batch_size grid as separate Lightning jobs, all logging into
-# ONE experiment in the experiment manager so they can be compared side by side
-# (rather than 9 unrelated experiments). See training/README.md, "Grouping
-# experiments" for how this works.
+# Launches a lr x batch_size grid as separate Lightning jobs. Each job is its
+# own experiment (litlogger has no cross-experiment "version" concept -- see
+# training/README.md, "Grouping experiments"). --logger_name is built as
+# "{project}/{workflow}/{experiment_group}/{experiment_name}" -- slash-
+# delimited names create real folder hierarchy in the Lightning UI (confirmed
+# by testing; undocumented in the public API reference, which only documents
+# a flat `name`). experiment_name = sweep-<params actually varied in this
+# grid> (currently lr + batch_size).
 
 import argparse
 import pathlib
+from datetime import datetime
 
 from lightning_sdk import Studio, Job, Machine
+
+PROJECT = "ml-100k"
+WORKFLOW = "train_movielens"
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -25,38 +33,43 @@ studio = Studio()
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 if args.smoke_test:
-    job_name = "sweep-launcher-smoke-test"
-    cmd = f"python {REPO_ROOT}/training/train_movielens.py --smoke_test"
+    timestamp = f"{datetime.now():%Y%m%d-%H%M%S}"
+    job_name = f"sweep-launcher-smoke-test-{timestamp}"
+    sweep_id = timestamp
+    experiment_group = sweep_id
+    experiment_name = "sweep-smoke-test"
+    logger_name = f"{PROJECT}/{WORKFLOW}/{experiment_group}/{experiment_name}"
+    cmd = (
+        f"python {REPO_ROOT}/training/train_movielens.py --smoke_test "
+        f"--logger_name {logger_name} "
+        f"--project {PROJECT} --workflow {WORKFLOW} "
+        f"--experiment_group {experiment_group} --experiment_name {experiment_name} "
+        f"--sweep_id {sweep_id}"
+    )
     Job.run(name=job_name, machine=Machine.CPU, studio=studio, command=cmd)
     print(f"Launched {job_name} → `{cmd}`")
     print(f"\nCheck this job's logs in the Jobs UI to confirm the remote path works "
           f"end to end, then rerun without --smoke_test for the real sweep.")
     raise SystemExit
 
-# Original sweep, already logged under
-# 'ml100k-sweep' in the experiment manager. The active grid below is a
-# separate experiment (new name + wider lr range), not a rerun of this one.
-# learning_rates = [1e-4, 1e-3, 1e-2]
-# batch_sizes    = [128, 256, 512]
-# EXPERIMENT_GROUP = "ml100k-sweep"
-
-# Wider than the original grid: pushes past the range where lr clearly hurts
-# convergence on either end, so the experiment manager shows the tradeoff
+# Wider than the original ml100k-sweep grid: pushes past the range where lr
+# clearly hurts convergence on either end, so the sweep shows the tradeoff
 # curve instead of three similar-looking runs.
 learning_rates = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1]
 batch_sizes    = [128, 256, 512]
-EXPERIMENT_GROUP = "ml100k-sweep-wide-lr"
+sweep_id = f"{datetime.now():%Y%m%d-%H%M%S}"
+experiment_group = sweep_id
 
 grid = [(lr, bs) for lr in learning_rates for bs in batch_sizes]
 
-# Shared across every job in this sweep: same --logger_name means all runs
-# become versions of ONE experiment, not N separate experiments. lr/batch_size
-# are still logged as metadata per run (see train_movielens.py), so each
-# version is distinguishable when comparing results.
-
 for idx, (lr, bs) in enumerate(grid):
-    # Unique per-job name -- only used to tell jobs apart in the Jobs UI.
-    job_name = f"{EXPERIMENT_GROUP}-{idx}-lr{lr}-bs{bs}"
+    # sweep-<varied params> -- lr + batch_size are the only params this grid
+    # varies, and every (lr, bs) combo in the grid is unique, so this alone
+    # is a unique experiment_name within this sweep's experiment_group.
+    experiment_name = f"sweep-lr{lr}-bs{bs}"
+    logger_name = f"{PROJECT}/{WORKFLOW}/{experiment_group}/{experiment_name}"
+    # Job.run's own name -- unrelated to litlogger, just the Jobs UI label.
+    job_name = f"sweep-{experiment_group}-{experiment_name}"
 
     cmd      = (
         f"python {REPO_ROOT}/training/train_movielens.py "
@@ -64,7 +77,10 @@ for idx, (lr, bs) in enumerate(grid):
         f"--batch_size {bs} "
         f"--precision 16 "
         f"--max_epochs 25 "
-        f"--logger_name {EXPERIMENT_GROUP}"
+        f"--logger_name {logger_name} "
+        f"--project {PROJECT} --workflow {WORKFLOW} "
+        f"--experiment_group {experiment_group} --experiment_name {experiment_name} "
+        f"--sweep_id {sweep_id}"
     )
 
     # Machine.CPU keeps this sweep free -- swap for Machine.H100 (or any other
@@ -73,10 +89,12 @@ for idx, (lr, bs) in enumerate(grid):
     # Studio.install_plugin('jobs') API, which no longer exists in this
     # SDK version -- machine= is now required, there's no implicit
     # "current machine" default.
+    # NOTE: this is set to CPU not H100 for savings during testing
     Job.run(name=job_name, machine=Machine.CPU, studio=studio, command=cmd)
 
     print(f"Launched {job_name} → `{cmd}`")
 
-print(f"\nAll {len(grid)} runs grouped under experiment '{EXPERIMENT_GROUP}' -- compare their "
-      f"versions in the experiment manager to pick the best config, then run that "
-      f"config's full training with its own --logger_name.")
+print(f"\nAll {len(grid)} runs grouped in the experiment manager under the folder "
+
+      f"'{PROJECT}/{WORKFLOW}/{experiment_group}/' -- compare them there to pick the best "
+      f"config, then run that config's full training with its own --logger_name.")

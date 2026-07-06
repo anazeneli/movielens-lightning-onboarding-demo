@@ -1,13 +1,12 @@
 # train_movielens.py
 
 import argparse
+from urllib.parse import quote
 
 import lightning as L
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
 from lightning_sdk import Studio
 from litlogger import LightningLogger
-# `recsys` resolves via the repo's editable install (`pip install -e .`) --
-# works regardless of cwd, no sys.path hack needed.
 from recsys.movielens_datamodule import MovieLens100K
 from recsys.model import TwoTowerModel
 
@@ -26,16 +25,18 @@ def main():
     parser.add_argument("--precision",     type=int,   default=32,   choices=[16,32], help="Trainer precision")
     # Logger settings
     parser.add_argument(
-        "--logger_name", type=str, default="ml100k-default",
-        help=(
-            "Experiment name in the experiment manager (the 'group'). Reuse the "
-            "same name across multiple runs -- e.g. every combo in a hyperparameter "
-            "sweep -- to group them as versions of ONE experiment instead of "
-            "creating a separate experiment per run. Each run still gets its own "
-            "timestamped version, so re-running never overwrites a prior one; "
-            "distinguish versions via the logged metadata (lr, batch_size, ...)."
-        ),
+        "--logger_name", type=str, default=None,
+        help="This run's experiment name. Defaults to run-lr<lr>-bs<batch_size> "
+             "(or run-smoke-test for --smoke_test); sweep_launcher.py overrides this with "
+             "its own sweep-* naming.",
     )
+    # Grouping metadata -- sweep_launcher.py sets these so many experiments can
+    # be filtered/compared as one sweep; this script just logs whatever it's given.
+    parser.add_argument("--project", type=str, default="ml-100k")
+    parser.add_argument("--workflow", type=str, default="train_movielens")
+    parser.add_argument("--experiment_group", type=str, default="")
+    parser.add_argument("--experiment_name", type=str, default="")
+    parser.add_argument("--sweep_id", type=str, default="")
     parser.add_argument(
         "--smoke_test", action="store_true",
         help=(
@@ -47,13 +48,15 @@ def main():
             "Trainer(fast_dev_run=True) -- Lightning forcibly swaps any real "
             "logger for a no-op DummyLogger under fast_dev_run, which would "
             "skip the very litlogger/checkpoint/artifact integration this is "
-            "meant to verify. --logger_name defaults to 'smoke-test' here "
-            "unless you override it."
+            "meant to verify."
         ),
     )
     args = parser.parse_args()
-    if args.smoke_test and args.logger_name == "ml100k-default":
-        args.logger_name = "smoke-test"
+    if args.logger_name is None:
+        args.logger_name = (
+            "run-smoke-test" if args.smoke_test
+            else f"run-lr{args.lr}-bs{args.batch_size}"
+        )
 
     # ── 2) Logger setup ─────────────────────────────────────────
     # Resolve the current teamspace from the Lightning SDK instead of hardcoding
@@ -77,6 +80,11 @@ def main():
         "max_epochs": args.max_epochs,
         "precision": args.precision,
         "smoke_test": args.smoke_test,
+        "project": args.project,
+        "workflow": args.workflow,
+        "experiment_group": args.experiment_group,
+        "experiment_name": args.experiment_name,
+        "sweep_id": args.sweep_id,
     })
 
     # ── 3) DataModule ───────────────────────────────────────────────
@@ -142,10 +150,13 @@ def main():
     logger.finalize()
 
     # litlogger's auto-printed URL appends a broken "- vNone" suffix; print a
-    # clean, working link to the experiment instead.
+    # clean, working link to the experiment instead. logger_name can contain
+    # "/" (see training/README.md, "Grouping experiments"), so it needs the
+    # same URL-encoding litlogger's own link uses, or the link breaks.
     print(
         f"📊 View experiment: "
-        f"https://lightning.ai/{teamspace.owner.name}/{teamspace_name}/experiments/{args.logger_name}"
+        f"https://lightning.ai/{teamspace.owner.name}/{teamspace_name}/experiments/"
+        f"{quote(args.logger_name, safe='')}"
     )
     if args.smoke_test:
         print("✅ Smoke test passed -- litlogger experiment, checkpoint, and PR-curve artifact all verified.")
