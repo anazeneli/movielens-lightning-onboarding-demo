@@ -1,0 +1,39 @@
+# This studio directory doubles as the home directory, so it's full of shell
+# configs, editor state, and credentials that must never be committed.
+# Strategy: ignore everything by default, then explicitly allow the project
+# files we actually want tracked.
+
+# 1) Ignore everything
+*
+
+# 2) Un-ignore directories so git will look inside them
+!.gitignore
+!.lightningignore
+!README.md
+!recsys/
+!training/
+!serving/
+!scratch.ipynb
+
+# 3) Un-ignore files inside those directories (the "*" rule above also blocks
+# nested paths, so each dir needs its own negation)
+!recsys/**
+!training/**
+!serving/**
+
+# 4) Re-ignore anything heavy/generated that might land inside the allowed dirs
+__pycache__/
+*.pyc
+*.ckpt
+lightning_logs/
+checkpoints/
+
+# Never these, no matter where they appear
+.claude/
+.claude.json
+.env
+.env.*
+*.pem
+*.key
+credentials*
+secrets*

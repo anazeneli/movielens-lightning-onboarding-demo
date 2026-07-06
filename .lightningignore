@@ -1,0 +1,43 @@
+.cache
+.conda
+.condarc
+.config
+.gitconfig
+.hushlogin
+.ipython
+.local
+.oh-my-zsh
+.profile
+.screenrc
+.vimrc
+.ssh
+.sudo_as_admin_successful
+.zcompdump*
+.zsh_history
+.zshrc
+.zshenv
+.zlogin
+.zprofile
+.zlogout
+.lightning
+.nv
+.nvm
+.npm
+.bower
+
+# ── Heavy / regenerable artifacts (excluded from studio duplicate & share) ──
+# Dataset now lives on the shared teamspace drive at /teamspace/data/ml-100k
+ml-100k
+# Training outputs — checkpoints & artifacts live in the experiment manager (litlogger)
+checkpoints
+my-models
+lightning_logs
+# Large media & caches
+Explainer videos
+__pycache__
+*.ckpt
+# Editor / assistant state — never needed in a duplicate or remote job
+.claude
+.claude.json
+.vscode
+.idea
