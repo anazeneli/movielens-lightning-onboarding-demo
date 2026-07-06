@@ -155,4 +155,8 @@ if __name__ == "__main__":
     log(f"starting server, max_batch_size={max_batch}")
     api = RecSysAPI(max_batch_size=max_batch)
     server = ls.LitServer(api, accelerator="auto")
-    server.run(port=8011)
+    # generate_client_file=True (LitServe's default) writes a client.py stub
+    # into the cwd once, skipping generation if the file already exists (so it
+    # never refreshes). We don't use it -- app.py is the real client, and the
+    # stub's example payload doesn't match this API -- so disable it here.
+    server.run(port=8011, generate_client_file=False)
