@@ -2,12 +2,21 @@
 #
 # Launches a lr x batch_size grid as separate Lightning jobs. Each job is its
 # own experiment (litlogger has no cross-experiment "version" concept -- see
-# training/README.md, "Grouping experiments"). --logger_name is built as
-# "{project}/{workflow}/{experiment_group}/{experiment_name}" -- slash-
-# delimited names create real folder hierarchy in the Lightning UI (confirmed
-# by testing; undocumented in the public API reference, which only documents
-# a flat `name`). experiment_name = sweep-<params actually varied in this
-# grid> (currently lr + batch_size).
+# training/README.md, "Grouping experiments").
+#
+# Naming: with log_model=True, litlogger registers the best checkpoint in the
+# model registry *under the experiment name*, recombined as
+# "{owner}/{teamspace}/{name}". The registry uses "/" only as the
+# org/teamspace/model_name delimiter, so the name must be a single flat segment
+# with NO "/". An earlier "{project}/{workflow}/{group}/{experiment}" scheme
+# gave UI folder hierarchy but made the registered model name unparseable
+# (6 slash-parts instead of 3) and blew up the checkpoint upload. Keep it flat
+# and short instead: "{project}-{sweep_id}-lr{lr}-bs{bs}". logger_name ==
+# experiment_name so the serving side (server.py, EXPERIMENT_NAME ->
+# "{owner}/{teamspace}/{experiment_name}") resolves the same string it was
+# registered under. project / workflow / group stay as logged metadata, and
+# runs from one sweep sort together by their shared "{project}-{sweep_id}-"
+# name prefix.
 
 import argparse
 import pathlib
@@ -37,8 +46,9 @@ if args.smoke_test:
     job_name = f"sweep-launcher-smoke-test-{timestamp}"
     sweep_id = timestamp
     experiment_group = sweep_id
-    experiment_name = "sweep-smoke-test"
-    logger_name = f"{PROJECT}/{WORKFLOW}/{experiment_group}/{experiment_name}"
+    # Flat, slash-free name (see header) -- also what log_model registers under.
+    experiment_name = f"{PROJECT}-{sweep_id}-smoke-test"
+    logger_name = experiment_name
     cmd = (
         f"python {REPO_ROOT}/training/train_movielens.py --smoke_test "
         f"--logger_name {logger_name} "
@@ -63,13 +73,14 @@ experiment_group = sweep_id
 grid = [(lr, bs) for lr in learning_rates for bs in batch_sizes]
 
 for idx, (lr, bs) in enumerate(grid):
-    # sweep-<varied params> -- lr + batch_size are the only params this grid
-    # varies, and every (lr, bs) combo in the grid is unique, so this alone
-    # is a unique experiment_name within this sweep's experiment_group.
-    experiment_name = f"sweep-lr{lr}-bs{bs}"
-    logger_name = f"{PROJECT}/{WORKFLOW}/{experiment_group}/{experiment_name}"
+    # Flat, slash-free name (see header) -- also what log_model registers under.
+    # {project}-{sweep_id} groups this sweep's runs by shared prefix; lr + bs
+    # are the only params this grid varies and every combo is unique, so the
+    # full string is a unique experiment_name within the sweep.
+    experiment_name = f"{PROJECT}-{sweep_id}-lr{lr}-bs{bs}"
+    logger_name = experiment_name
     # Job.run's own name -- unrelated to litlogger, just the Jobs UI label.
-    job_name = f"sweep-{experiment_group}-{experiment_name}"
+    job_name = f"sweep-{experiment_name}"
 
     cmd      = (
         f"python {REPO_ROOT}/training/train_movielens.py "
@@ -94,7 +105,6 @@ for idx, (lr, bs) in enumerate(grid):
 
     print(f"Launched {job_name} → `{cmd}`")
 
-print(f"\nAll {len(grid)} runs grouped in the experiment manager under the folder "
-
-      f"'{PROJECT}/{WORKFLOW}/{experiment_group}/' -- compare them there to pick the best "
+print(f"\nAll {len(grid)} runs share the name prefix '{PROJECT}-{experiment_group}-' "
+      f"in the experiment manager -- filter/sort by it to compare them, pick the best "
       f"config, then run that config's full training with its own --logger_name.")
