@@ -78,10 +78,10 @@ studio-specific.
 ```bash
 python training/train_movielens.py --smoke_test   # 1) local smoke test
 python training/sweep_launcher.py --smoke_test    # 2) remote smoke test (one job, real grouping)
-python training/sweep_launcher.py                 # 3) full sweep, grouped under one folder in the experiment manager
+python training/sweep_launcher.py                 # 3) full sweep, runs share a name prefix in the experiment manager
 ```
 
-Pick the best config from that folder in the Lightning UI, then use
+Pick the best config by that shared name prefix in the Lightning UI, then use
 `training/launch_job.py` to run it longer as its own remote job -- it's
 anchored to its own file location, so it works regardless of which directory
 you run it from (unlike a one-off snippet using the repo-root-relative
@@ -115,20 +115,28 @@ resolution details.
 
 ## Experiment organization
 
-Each launched job is its own LitLogger experiment. A slash-delimited
-`--logger_name` creates real folder hierarchy in the experiment manager UI
-(confirmed by testing — undocumented in the public API):
+Each launched job is its own LitLogger experiment. With `log_model=True`,
+litlogger registers the best checkpoint in the model registry *under the
+experiment name*, recombined as `{owner}/{teamspace}/{name}`. The registry
+uses `/` only as the `owner/teamspace/model_name` delimiter, so the name must
+be a single flat segment with **no `/`** — an earlier slash-delimited scheme
+gave UI folder hierarchy but produced an unparseable model name (too many
+slash-parts) and broke checkpoint upload. `--logger_name` is a flat, short
+string instead:
 
 ```text
---logger_name = {project}/{workflow}/{experiment_group}/{experiment_name}
-       example = ml-100k/train_movielens/20260706-192010/sweep-lr0.01-bs256
+--logger_name = {project}-{sweep_id}-lr{lr}-bs{bs}
+       example = ml-100k-20260706-192010-lr0.01-bs256
 ```
 
-`sweep_launcher.py` generates the `experiment_group` (one per sweep
-invocation) and a unique `experiment_name` per job; `train_movielens.py`
-never hardcodes any of this — run it standalone and it defaults to a flat
-`run-lr<lr>-bs<batch_size>` name instead (no folder). Full naming convention
-and caveats: [`training/README.md`](training/README.md), "Grouping experiments".
+`sweep_launcher.py` generates the `sweep_id` (one per sweep invocation), so all
+of a sweep's runs share the `{project}-{sweep_id}-` prefix — filter/sort by it
+in the experiment manager to compare them. `logger_name == experiment_name`, so
+serving resolves the exact string the checkpoint was registered under (see
+`serving/server.py`). `train_movielens.py` never hardcodes any of this — run it
+standalone and it defaults to a flat `run-lr<lr>-bs<batch_size>` name. Full
+naming convention and caveats: [`training/README.md`](training/README.md),
+"Grouping experiments".
 
 ## Checkpoints & artifacts
 
