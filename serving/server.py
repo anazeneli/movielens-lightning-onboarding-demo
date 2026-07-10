@@ -16,8 +16,7 @@ def log(msg):
 # rather than the current one -- unlike EXPERIMENT_NAME, this doesn't get
 # recombined with Studio().teamspace, since it must keep pointing at whatever
 # teamspace it was trained in, regardless of which teamspace the server runs in.
-# Placeholder below -- replace with your own "owner/teamspace/experiment_name".
-DEFAULT_CHECKPOINT_NAME = "your-org/your-teamspace/your-experiment-name"
+DEFAULT_CHECKPOINT_NAME = "archetype/poc/anazeneli-ml100k-sweep-20260527-202840-3-lr1e-03-bs128-20260527-203640-e68619"
 
 def _resolve_checkpoint():
     """Locate a checkpoint uploaded by litlogger (see training/README.md).
