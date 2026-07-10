@@ -145,26 +145,38 @@ survive.
 ## Grouping experiments
 
 litlogger's public API only documents a flat `name` -- no `folder`/`group`
-parameter. But a **slash-delimited `--logger_name` creates real folder
-hierarchy in the Lightning experiment manager UI** (confirmed by testing;
-undocumented). `sweep_launcher.py` uses this to group every job in a sweep
-under one folder:
+parameter. An earlier version abused a **slash-delimited `--logger_name`** to
+fake folder hierarchy in the UI, but with `log_model=True` litlogger registers
+the best checkpoint in the model registry *under the experiment name*,
+recombined as `{owner}/{teamspace}/{name}`. The registry uses `/` only as the
+`owner/teamspace/model_name` delimiter, so a multi-slash name is unparseable
+and the checkpoint upload fails:
 
 ```text
---logger_name = {project}/{workflow}/{experiment_group}/{experiment_name}
-       example = ml-100k/train_movielens/20260706-192010/sweep-lr0.01-bs256
+ValueError: Model name must be in the format `organization/teamspace/model_name`
 ```
 
-| Segment | Flag | Meaning | Example |
-|---|---|---|---|
-| Project | `--project` | The broader body of work. | `ml-100k` |
-| Workflow | `--workflow` | The repeatable code path (provenance, not a visible grouping tier on its own -- see the root README). | `train_movielens` |
-| Experiment group | `--experiment_group` | One sweep -- all jobs from one `sweep_launcher.py` invocation share this (it's just the `sweep_id`). | `20260706-192010` |
-| Experiment | `--experiment_name` | This one job's config. | `sweep-lr0.01-bs256` |
+So `--logger_name` is now a single flat, hyphen-delimited segment; grouping is
+by shared **name prefix** instead of folders:
 
-Every field is *also* logged as metadata (along with `--sweep_id`, `lr`,
-`batch_size`, ...), so it's filterable/searchable even without relying on the
-folder view.
+```text
+--logger_name = {project}-{sweep_id}-lr{lr}-bs{bs}
+       example = ml-100k-20260706-192010-lr0.01-bs256
+```
+
+`sweep_launcher.py` still passes each piece down as its own CLI flag, logged as
+metadata -- so everything stays filterable/searchable regardless of the name:
+
+| Flag | Meaning | Example |
+|---|---|---|
+| `--project` | The broader body of work; leads the name prefix. | `ml-100k` |
+| `--workflow` | The repeatable code path (provenance metadata; not in the name). | `train_movielens` |
+| `--experiment_group` | One sweep -- all jobs from one `sweep_launcher.py` invocation share this `sweep_id`; second part of the name prefix. | `20260706-192010` |
+| `--experiment_name` | This one job's full flat name (== `--logger_name`). | `ml-100k-20260706-192010-lr0.01-bs256` |
+| `--sweep_id` | Same value as `experiment_group`. | `20260706-192010` |
+
+All of a sweep's runs share the `{project}-{sweep_id}-` prefix, so filter/sort
+by it in the experiment manager to compare them.
 
 **Responsibility split:**
 - `train_movielens.py` owns one experiment -- its own config, metrics,
@@ -173,24 +185,24 @@ folder view.
   `--experiment_group`, `--experiment_name`, and `--sweep_id` (all default to
   `""`, unset) are just logged as metadata, whatever they're set to. If
   `--logger_name` isn't given either, it defaults to a flat
-  `run-lr<lr>-bs<batch_size>` (or `run-smoke-test` for `--smoke_test`) -- no
-  folder, since a standalone run has no experiment group.
+  `run-lr<lr>-bs<batch_size>` (or `run-smoke-test` for `--smoke_test`), since a
+  standalone run has no experiment group.
   **It has no dependency on `sweep_launcher.py`** -- no import, no requirement
   that it's running -- so it's a complete, standalone experiment either way.
 - `sweep_launcher.py` owns the grouping: it generates one `sweep_id` per
-  invocation (a timestamp) and a unique `--experiment_name` per job (`sweep-
-  lr<lr>-bs<batch_size>` -- every lr/batch_size combo in the grid is unique, so
-  this alone is unique within the group), builds the slash-delimited
-  `--logger_name` from `project`/`workflow`/`experiment_group`/`experiment_name`,
-  and passes all of it down as plain CLI args -- the only thing connecting the
-  two scripts.
+  invocation (a timestamp) and builds a flat, unique `--logger_name` per job,
+  `{project}-{sweep_id}-lr<lr>-bs<batch_size>` -- every lr/batch_size combo in
+  the grid is unique, so the full string is unique within the sweep. It sets
+  `--experiment_name` to that same string and passes all of it down as plain
+  CLI args -- the only thing connecting the two scripts.
 
 A few things worth knowing:
 
-- **Naming convention:** `sweep-*` for anything launched by
-  `sweep_launcher.py`, `run-*` for standalone `train_movielens.py` runs. Job
-  names (the Lightning **Jobs** UI, a separate system from experiments) stay
-  dash-only and are never used as a `--logger_name`.
+- **Naming convention:** experiment names are flat and hyphen-delimited --
+  `{project}-{sweep_id}-lr..-bs..` for sweep jobs, `run-lr..-bs..` (or
+  `run-smoke-test`) for standalone `train_movielens.py` runs. The **Jobs** UI
+  label (a separate system from experiments) is `sweep-<experiment_name>` and is
+  never used as a `--logger_name`.
 - **Nothing is ever overwritten.** litlogger does a strict get-or-create keyed
   on the full `--logger_name` string -- reusing one exactly reuses the *same*
   experiment (metrics/steps from different runs collide in it), so every job's
@@ -202,13 +214,13 @@ A few things worth knowing:
   launch jobs with different `machine=` values yourself, keeping the same
   `experiment_group`.
 - **Local/standalone runs** default to `experiment_group=""` -- a real
-  experiment, just not part of a sweep folder.
+  experiment, just not part of a sweep's prefix group.
 - **Smoke tests** get their own `experiment_group` (a fresh timestamp for
   `sweep_launcher.py --smoke_test`, so repeated smoke tests don't collide) and
   `run-smoke-test` for direct local smoke tests.
 
-To run this sweep's demo: launch it, open the printed
-`ml-100k/train_movielens/<experiment_group>/` folder in the experiment
-manager, compare the jobs' `val_ap` to find the best config, then kick off a
-full run of that config under its own `--logger_name` (e.g. `ml100k-best`) --
-see the root [README.md](../README.md)'s "Workflow" section, step 5.
+To run this sweep's demo: launch it, then in the experiment manager filter by
+the printed `ml-100k-<sweep_id>-` name prefix, compare the jobs' `val_ap` to
+find the best config, then kick off a full run of that config under its own
+`--logger_name` (e.g. `ml100k-best`) -- see the root [README.md](../README.md)'s
+"Workflow" section, step 5.
