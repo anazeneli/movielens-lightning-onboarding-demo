@@ -70,14 +70,19 @@ class TwoTowerModel(LightningModule):
         self.val_recall(preds, targets)
         self.val_ap.update(preds, targets)
 
-        self.log("val_loss", loss, prog_bar=True)
+        # sync_dist=True on the plain tensors only: torchmetrics objects below
+        # aggregate across ranks themselves, so syncing them again would warn.
+        # Under DDP these two drive callbacks -- ModelCheckpoint monitors val_ap
+        # and EarlyStopping monitors val_loss -- and per-rank values let ranks
+        # disagree about the best epoch and when to stop.
+        self.log("val_loss", loss, prog_bar=True, sync_dist=True)
         self.log("val_acc", self.val_acc, prog_bar=True)
         self.log("val_precision", self.val_precision)
         self.log("val_recall", self.val_recall)
 
     def on_validation_epoch_end(self):
         val_ap = self.val_ap.compute()
-        self.log("val_ap", val_ap, prog_bar=True)
+        self.log("val_ap", val_ap, prog_bar=True, sync_dist=True)
         self.val_ap.reset()
 
     def configure_optimizers(self):
