@@ -3,6 +3,9 @@ import torch
 import pandas as pd
 from recsys.model import TwoTowerModel
 from recsys.constants import RAW_DATA_DIR as DATA_DIR
+# Sibling module, not a package import -- `serving/` isn't packaged, and running
+# this as `python serving/recommender_demo.py` puts that dir on sys.path.
+from server import _resolve_checkpoint
 
 # 1) Load MovieLens item metadata from the shared teamspace drive
 item_cols = ["movie_id","title","release_date","video_release_date","IMDb_URL",
@@ -11,9 +14,13 @@ item_cols = ["movie_id","title","release_date","video_release_date","IMDb_URL",
              "Romance","Sci-Fi","Thriller","War","Western"]
 items = pd.read_csv(os.path.join(DATA_DIR, "u.item"), sep="|", names=item_cols, encoding="latin-1")
 
-# 2) Load trained Two-Tower model checkpoint
-ckpt_path = "checkpoints/ml100k-epoch=19-val_acc=0.61.ckpt"
-model = TwoTowerModel.load_from_checkpoint(ckpt_path)
+# 2) Load the trained Two-Tower checkpoint from the experiment manager, using the
+# same resolution as server.py: CHECKPOINT_NAME, else EXPERIMENT_NAME in this
+# teamspace, else the seeded demo checkpoint. See serving/README.md.
+# weights_only=False for the same reason as server.py: PyTorch >=2.6 otherwise
+# rejects this checkpoint's pickled numpy globals.
+ckpt_path = _resolve_checkpoint()
+model = TwoTowerModel.load_from_checkpoint(str(ckpt_path), weights_only=False)
 model.eval()
 
 # 3) Suppose we want recommendations for user_id = 42 (factorized index)

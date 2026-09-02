@@ -1,11 +1,5 @@
 # model.py
 
-import os
-
-import matplotlib
-
-matplotlib.use("Agg")  # headless rendering for the PR-curve artifact
-import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,7 +8,6 @@ from torchmetrics.classification import (
     BinaryAccuracy,
     BinaryAveragePrecision,
     BinaryPrecision,
-    BinaryPrecisionRecallCurve,
     BinaryRecall,
 )
 
@@ -40,10 +33,8 @@ class TwoTowerModel(LightningModule):
         self.val_precision = BinaryPrecision()
         self.val_recall = BinaryRecall()
         # Average precision = area under the PR curve; the scalar used to
-        # rank/compare runs. The curve itself is logged as a plot artifact.
+        # rank/compare runs (ModelCheckpoint monitors it).
         self.val_ap = BinaryAveragePrecision()
-        self.val_pr_curve = BinaryPrecisionRecallCurve()
-        self.best_val_ap = -1.0
 
     def forward(self, user_ids, item_ids):
         u_emb = self.user_embedding(user_ids)
@@ -78,7 +69,6 @@ class TwoTowerModel(LightningModule):
         self.val_precision(preds, targets)
         self.val_recall(preds, targets)
         self.val_ap.update(preds, targets)
-        self.val_pr_curve.update(preds, targets)
 
         self.log("val_loss", loss, prog_bar=True)
         self.log("val_acc", self.val_acc, prog_bar=True)
@@ -88,40 +78,7 @@ class TwoTowerModel(LightningModule):
     def on_validation_epoch_end(self):
         val_ap = self.val_ap.compute()
         self.log("val_ap", val_ap, prog_bar=True)
-
-        # Keep a single PR-curve artifact for the best-AP epoch, so it's easy
-        # to compare the winning curve across runs.
-        if not self.trainer.sanity_checking and val_ap.item() > self.best_val_ap:
-            self.best_val_ap = val_ap.item()
-            self._log_pr_curve()
-
         self.val_ap.reset()
-        self.val_pr_curve.reset()
-
-    def _log_pr_curve(self):
-        precision, recall, _ = self.val_pr_curve.compute()
-        precision = precision.detach().cpu().numpy()
-        recall = recall.detach().cpu().numpy()
-
-        fig, ax = plt.subplots(figsize=(6, 5))
-        ax.plot(recall, precision, marker=".")
-        ax.set_xlabel("Recall")
-        ax.set_ylabel("Precision")
-        ax.set_title(f"Precision-Recall Curve (AP={self.best_val_ap:.4f}, epoch {self.current_epoch})")
-        ax.set_xlim(0.0, 1.0)
-        ax.set_ylim(0.0, 1.05)
-        ax.grid(True, alpha=0.3)
-
-        out_dir = getattr(self.logger, "log_dir", None) or "."
-        os.makedirs(out_dir, exist_ok=True)
-        path = os.path.join(out_dir, "pr_curve.png")
-        fig.savefig(path, dpi=120, bbox_inches="tight")
-        plt.close(fig)
-
-        # Upload the plot as an experiment artifact when the logger supports it.
-        experiment = getattr(self.logger, "experiment", None)
-        if experiment is not None and hasattr(experiment, "log_file"):
-            experiment.log_file(path, remote_path="pr_curve.png", verbose=False)
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
