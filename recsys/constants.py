@@ -9,5 +9,5 @@ vars below, which still take precedence.
 
 import os
 
-RAW_DATA_DIR = os.environ.get("MOVIELENS_DATA_DIR", "/teamspace/lightning_storage/ml-100k")
-LITDATA_DIR  = os.environ.get("MOVIELENS_LITDATA_DIR", os.path.join(RAW_DATA_DIR, "ml-100k-optimized"))
+RAW_DATA_DIR = os.environ.get("MOVIELENS_DATA_DIR", "/teamspace/lightning_storage/data/ml-100k")
+LITDATA_DIR  = os.environ.get("MOVIELENS_LITDATA_DIR", "/teamspace/lightning_storage/data/ml-100k-litdata")
