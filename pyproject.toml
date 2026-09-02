@@ -7,7 +7,14 @@ name = "recsys"
 version = "0.0.0"
 description = "Shared two-tower recommender library for this onboarding demo (training + serving)"
 requires-python = ">=3.10"
-dependencies = []
+# Everything else (lightning, torch, litdata, litserve, streamlit) comes from the
+# Lightning Studio base image. litlogger is pinned because the base image can
+# carry a stale 0.1.7, which passes a `version` kwarg that lightning_sdk
+# >=2026.4.16 no longer accepts -- every run then dies at `trainer.fit` with
+# `TypeError: ... unexpected keyword argument 'version'`, remote jobs included.
+dependencies = [
+    "litlogger>=2026.4.16",
+]
 
 [tool.setuptools]
 packages = ["recsys"]
