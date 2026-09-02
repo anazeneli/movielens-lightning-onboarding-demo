@@ -32,8 +32,8 @@ python training/sweep_launcher.py
 `recsys/movielens_datamodule.py` streams training data with
 [LitData](https://github.com/Lightning-AI/litData/tree/main)'s
 `StreamingDataset` / `StreamingDataLoader`, reading from a LitData-optimized copy of the ratings on
-the shared drive (`/teamspace/lightning_storage/ml-100k/ml-100k-optimized`, built by
-`optimize_data.py` from the raw files in `.../ml-100k`).
+the shared drive (`/teamspace/lightning_storage/data/ml-100k-litdata`, built by
+`optimize_data.py` from the raw files in `.../data/ml-100k`).
 
 ### Changing the shared-drive root
 
@@ -45,11 +45,11 @@ imported by every script that needs them (`fetch_data.py`, `optimize_data.py`,
 
 | Constant | Env var override | Default |
 |---|---|---|
-| `RAW_DATA_DIR` | `MOVIELENS_DATA_DIR` | `/teamspace/lightning_storage/ml-100k` |
-| `LITDATA_DIR` | `MOVIELENS_LITDATA_DIR` | `<RAW_DATA_DIR>/ml-100k-optimized` |
+| `RAW_DATA_DIR` | `MOVIELENS_DATA_DIR` | `/teamspace/lightning_storage/data/ml-100k` |
+| `LITDATA_DIR` | `MOVIELENS_LITDATA_DIR` | `/teamspace/lightning_storage/data/ml-100k-litdata` |
 
 Both defaults must resolve to a path *inside* one of the shared drive's
-mounted subfolders (e.g. `ml-100k/...`) -- `/teamspace/lightning_storage/`
+mounted subfolders (here, `data/...`) -- `/teamspace/lightning_storage/`
 itself is not writable by the studio user, only its mounted subfolders are.
 Writing to it silently hangs `optimize_data.py` instead of raising (the
 worker subprocess dies without reporting an error, and the main process
@@ -236,3 +236,59 @@ the printed `ml-100k-<sweep_id>-` name prefix, compare the jobs' `val_ap` to
 find the best config, then kick off a full run of that config under its own
 `--logger_name` (e.g. `ml100k-best`) -- see the root [README.md](../README.md)'s
 "Workflow" section, step 5.
+
+## Multi-node training (MMT)
+
+The `DataModule` needs no structural changes to run across nodes --
+`StreamingDataset` reads `torch.distributed`'s rank/world_size at construction
+and shards chunks by global rank + local worker on its own. What does need care
+is **metric syncing**, because unsynced metrics silently change which checkpoint
+you keep.
+
+### Rank syncing: `sync_dist=True` on plain tensors
+
+Under DDP, `self.log()` reports a **per-rank** value unless told otherwise.
+`recsys/model.py` logs two kinds of value, and only one syncs itself:
+
+| Logged value | Syncs across ranks? | Why |
+|---|---|---|
+| `val_acc`, `val_precision`, `val_recall`, and the `train_*` metrics | Automatically | They're `torchmetrics` objects, which aggregate across ranks internally. Adding `sync_dist=True` on top is redundant and Lightning warns about it. |
+| `val_loss`, `val_ap` | **Only with `sync_dist=True`** | Plain tensors. Nothing aggregates them for you. |
+
+Those two are exactly the ones wired to callbacks -- `ModelCheckpoint` monitors
+`val_ap`, `EarlyStopping` monitors `val_loss`. Left unsynced, each rank compares
+its own shard's value, so ranks can disagree about which epoch was best and
+about when to stop; a rank that stops early leaves the others waiting at a
+collective. Hence:
+
+```python
+self.log("val_loss", loss, prog_bar=True, sync_dist=True)
+self.log("val_ap",   val_ap, prog_bar=True, sync_dist=True)
+```
+
+`sync_dist=True` is a no-op on a single device, so this costs nothing for the
+normal single-node path.
+
+### Already correct, no change needed
+
+- **Split determinism.** `train_test_split(...)` takes `seed: int = 42` -- a
+  fixed default, not a random one, so every rank derives the *same* split
+  without passing anything. Pass `seed=` only to be explicit.
+- **Construction order.** `StreamingDataset` is built inside `setup()`, which
+  Lightning calls after the process group exists. Never build it in `__init__`
+  or a notebook cell for an MMT job -- it would read rank/world_size too early.
+- **Resumption.** `StreamingDataLoader` implements `state_dict()` /
+  `load_state_dict()`, and Lightning's fit loop already saves and restores that
+  through the normal checkpoint (`_combined_loader._state_dicts()`). A resumed
+  job continues at the right shard -- no manual wiring, which matters more at
+  MMT scale where a preempted node is likelier.
+
+### Worth revisiting on bigger machines
+
+`num_workers` defaults to `0` to dodge shared-memory IPC crashes on containers
+with a small `/dev/shm`. MMT machines are usually larger, so raising it to 2-4
+improves streaming throughput -- that's also when Lightning's "does not have
+many workers" hint stops appearing.
+
+> As with LitData itself, this is the *pattern*, not a need: MovieLens 100K
+> trains in seconds on one CPU and gains nothing from multiple nodes.
