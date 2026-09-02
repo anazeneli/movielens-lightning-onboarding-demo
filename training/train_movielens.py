@@ -49,7 +49,7 @@ def main():
             "creates a real (tiny) experiment. Deliberately does NOT use "
             "Trainer(fast_dev_run=True) -- Lightning forcibly swaps any real "
             "logger for a no-op DummyLogger under fast_dev_run, which would "
-            "skip the very litlogger/checkpoint/artifact integration this is "
+            "skip the very litlogger/checkpoint integration this is "
             "meant to verify."
         ),
     )

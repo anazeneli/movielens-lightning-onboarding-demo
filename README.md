@@ -138,12 +138,15 @@ standalone and it defaults to a flat `run-lr<lr>-bs<batch_size>` name. Full
 naming convention and caveats: [`training/README.md`](training/README.md),
 "Grouping experiments".
 
-## Checkpoints & artifacts
+## Checkpoints
 
-Nothing is kept in the studio: litlogger uploads checkpoints and artifacts
-straight to the experiment manager on every run (see
+Nothing is kept in the studio: litlogger uploads the best checkpoint straight to
+the experiment manager on every run (see
 [`training/README.md`](training/README.md)). This keeps a remote job's
 ephemeral disk irrelevant, and this repo checkpoint-free.
+
+No file artifacts are logged — see `training/README.md`, step 5, for when one is
+actually worth adding.
 
 ## Version control
 
