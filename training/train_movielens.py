@@ -1,7 +1,14 @@
 # train_movielens.py
-import os 
+import os
 import argparse
+import warnings
 from urllib.parse import quote
+
+# Lightning calls logger.log_graph() on every logger unconditionally, and
+# litlogger answers with a UserWarning because it doesn't implement it. Nothing
+# is wrong and there's no trainer flag to skip the call, so drop the one message
+# rather than leave permanent noise in every run's output.
+warnings.filterwarnings("ignore", message="LightningLogger does not support `log_graph`")
 
 import lightning as L
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
