@@ -1,5 +1,5 @@
 # train_movielens.py
-
+import os 
 import argparse
 from urllib.parse import quote
 
@@ -9,6 +9,8 @@ from lightning_sdk import Studio
 from litlogger import LightningLogger
 from recsys.movielens_datamodule import MovieLens100K
 from recsys.model import TwoTowerModel
+
+DATA_ROOT = os.environ.get("MOVIELENS_LITDATA_DIR", "/teamspace/lightning_storage/data/ml-100k-litdata")
 
 
 def main():
@@ -41,8 +43,8 @@ def main():
         "--smoke_test", action="store_true",
         help=(
             "Run the REAL pipeline at minimal scale (1 epoch, 2 batches) to "
-            "verify everything works end to end: litlogger experiment, "
-            "checkpoint upload, PR-curve artifact -- all still go to the "
+            "verify everything works end to end: litlogger experiment and "
+            "checkpoint upload -- both still go to the "
             "experiment manager, not local disk. NOT side-effect-free: it "
             "creates a real (tiny) experiment. Deliberately does NOT use "
             "Trainer(fast_dev_run=True) -- Lightning forcibly swaps any real "
@@ -79,6 +81,7 @@ def main():
         "lr": args.lr,
         "max_epochs": args.max_epochs,
         "precision": args.precision,
+        "data_dir": DATA_ROOT, 
         "smoke_test": args.smoke_test,
         "project": args.project,
         "workflow": args.workflow,
@@ -88,7 +91,7 @@ def main():
     })
 
     # ── 3) DataModule ───────────────────────────────────────────────
-    dm = MovieLens100K(batch_size=args.batch_size, val_split=args.val_split)
+    dm = MovieLens100K(data_dir=DATA_ROOT, batch_size=args.batch_size, val_split=args.val_split)
     dm.prepare_data()
     dm.setup()
     # cardinalities exposed by the DataModule (computed over the full dataset)
@@ -159,7 +162,7 @@ def main():
         f"{quote(args.logger_name, safe='')}"
     )
     if args.smoke_test:
-        print("✅ Smoke test passed -- litlogger experiment, checkpoint, and PR-curve artifact all verified.")
+        print("✅ Smoke test passed -- litlogger experiment and checkpoint upload verified.")
 
 if __name__ == "__main__":
     main()
