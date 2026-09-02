@@ -122,12 +122,24 @@ knowing, found only by actually doing this (not documented upstream):
   this requires (join against `download_dir` rather than trusting the result
   is absolute).
 
-**5. Log file artifacts.** The PR-curve plot in `recsys/model.py` is uploaded as
-a file artifact:
-```python
-self.logger.experiment.log_file(path, remote_path="pr_curve.png")
-```
-It's stored remotely under `experiments/<name>/pr_curve.png`.
+**5. File artifacts — not used here.** litlogger can upload arbitrary files
+(`logger.experiment.log_file(path, remote_path=...)`, stored under
+`experiments/<name>/<remote_path>`), but this repo logs none. Two reasons:
+
+- **It doesn't currently work in every teamspace.** The upload goes through the
+  teamspace drive blob endpoint, which returns `404 Not Found` here. That's
+  server-side — no package version avoids it — and an unguarded `log_file` call
+  raises, so it takes down an otherwise healthy run at the end of a validation
+  epoch. Metrics and checkpoints upload by a different path and are unaffected.
+- **A PR-curve plot didn't earn its place.** This repo used to render and upload
+  one per best epoch. It's fully reconstructible from metrics already logged, so
+  it added an upload (and a failure mode) for something you could regenerate.
+
+Log a file artifact when a run produces something you genuinely can't recover
+from the metrics — qualitative eval output for a specific test case, a confusion
+matrix over a fixed slice, sample predictions you want to eyeball later. Not for
+a plot of numbers you're already logging. If you do add one, wrap it so a failed
+upload warns instead of killing the run.
 
 **6. Finalize.**
 ```python
@@ -137,7 +149,7 @@ Flushes any buffered metrics and performs the deferred checkpoint upload.
 
 ### Why this keeps the studio lean
 The local `lightning_logs/` dir is only *transient staging* — the real copies of
-metrics, checkpoints, and artifacts live in the experiment manager. That's why
+metrics and checkpoints live in the experiment manager. That's why
 this repo has no `checkpoints/` folder and `lightning_logs/` is ignored: on a
 remote job machine the local disk is ephemeral anyway, but the uploaded results
 survive.
@@ -179,8 +191,8 @@ All of a sweep's runs share the `{project}-{sweep_id}-` prefix, so filter/sort
 by it in the experiment manager to compare them.
 
 **Responsibility split:**
-- `train_movielens.py` owns one experiment -- its own config, metrics,
-  checkpoint, artifacts. It never hardcodes what it belongs to: `--project`
+- `train_movielens.py` owns one experiment -- its own config, metrics, and
+  checkpoint. It never hardcodes what it belongs to: `--project`
   (default `ml-100k`), `--workflow` (default `train_movielens`),
   `--experiment_group`, `--experiment_name`, and `--sweep_id` (all default to
   `""`, unset) are just logged as metadata, whatever they're set to. If

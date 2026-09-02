@@ -9,7 +9,7 @@ model.py
     ``TwoTowerModel`` — a LightningModule with separate user and item
     embedding tables whose dot product scores a (user, item) pair. Trained on
     implicit feedback (rating >= 4 → positive); logs accuracy / precision /
-    recall / average-precision and a precision-recall-curve artifact.
+    recall / average-precision.
 
 constants.py
     ``RAW_DATA_DIR`` / ``LITDATA_DIR`` — single source of truth for the
