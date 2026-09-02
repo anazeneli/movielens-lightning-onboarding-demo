@@ -67,8 +67,11 @@ Either gets you the code; pick whichever fits:
   cd movielens-lightning-onboarding-demo
   pip install -e .   # installs `recsys` in editable mode
   ```
-  Every dependency is already part of the standard Lightning Studio base
-  image — nothing else to install.
+  Run this in a **duplicated Studio too**, not just a fresh clone — it also
+  upgrades `litlogger` past the stale version some base images ship, which
+  otherwise kills every run (local and remote) at `trainer.fit`. Everything
+  else — lightning, torch, litdata, litserve, streamlit — comes from the
+  standard Lightning Studio base image.
 
 Either way, data setup is unchanged: it's step 1, and it's teamspace-wide, not
 studio-specific.
