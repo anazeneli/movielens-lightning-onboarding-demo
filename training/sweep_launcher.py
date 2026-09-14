@@ -88,8 +88,8 @@ if args.smoke_test:
 # Wider than the original ml100k-sweep grid: pushes past the range where lr
 # clearly hurts convergence on either end, so the sweep shows the tradeoff
 # curve instead of three similar-looking runs.
-learning_rates = [1e-5] #, 1e-4, 1e-3, 1e-2, 1e-1]
-batch_sizes    = [128] #, 256, 512]
+learning_rates = [1e-4, 1e-3, 1e-2]
+batch_sizes    = [128, 256]
 sweep_id = f"{datetime.now():%Y%m%d-%H%M%S}"
 experiment_group = sweep_id
 

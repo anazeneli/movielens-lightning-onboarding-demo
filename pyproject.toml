@@ -7,13 +7,17 @@ name = "recsys"
 version = "0.0.0"
 description = "Shared two-tower recommender library for this onboarding demo (training + serving)"
 requires-python = ">=3.10"
-# Everything else (lightning, torch, litdata, litserve, streamlit) comes from the
-# Lightning Studio base image. litlogger is pinned because the base image can
-# carry a stale 0.1.7, which passes a `version` kwarg that lightning_sdk
-# >=2026.4.16 no longer accepts -- every run then dies at `trainer.fit` with
-# `TypeError: ... unexpected keyword argument 'version'`, remote jobs included.
+# lightning, torch, litserve and streamlit come from the Studio base image.
+# These four don't, and each one broke a run when missing:
+#   litlogger  - base image can ship a stale 0.1.7 that kills trainer.fit
+#   litmodels  - imported by train_movielens / server / batch_inference
+#   litdata    - 0.2.64 crashes optimize() on a dropped lightning-sdk symbol
+#   pyarrow    - pandas needs a Parquet engine for batch_inference's output
 dependencies = [
     "litlogger>=2026.4.16",
+    "litmodels>=0.1.8",
+    "litdata>=0.2.75",
+    "pyarrow>=15",
 ]
 
 [tool.setuptools]
