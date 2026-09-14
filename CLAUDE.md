@@ -53,6 +53,37 @@ to home (`$LIGHTNING_ARTIFACTS_DIR`) and surface afterwards under
 `/teamspace/jobs/<name>/artifacts`, which is **read-only**. Writing there from
 inside a job fails with `OSError: [Errno 30] Read-only file system`.
 
+**If you don't upload it, it is gone.** This is the single most important thing
+to internalise about writing code that runs here. Every job and pipeline step
+runs on a machine that is destroyed when the step ends. A file written to local
+disk — including `$LIGHTNING_ARTIFACTS_DIR` — is **not** guaranteed to survive.
+
+Do not rely on automatic artifact collection. Verified the hard way: a pipeline
+step wrote `recommendations.parquet` to `$LIGHTNING_ARTIFACTS_DIR`, completed
+successfully, and the file appeared **nowhere** afterwards — not under
+`lit://<owner>/<teamspace>/jobs/`, not under `/artifacts/`. Nothing errored. The
+output was simply lost.
+
+Anything you need after the run must be **explicitly pushed** to durable storage:
+
+| What | How | Example |
+|---|---|---|
+| Model checkpoints | `log_model=True`, or `litmodels.upload_model` | `train_movielens.py` |
+| Arbitrary output files | `litmodels.upload_model_files` | `serving/batch_inference.py` |
+| Metrics / params | litlogger — uploads as the run proceeds | `train_movielens.py` |
+| Ad-hoc files | `lightning cp <file> lit://<owner>/<teamspace>/uploads/<path>` | — |
+
+Both upload paths are versioned: re-uploading the same name adds a version rather
+than overwriting, so scheduled jobs accumulate history for free.
+
+Note litlogger's `log_file` artifact API is **not** a working route in this
+teamspace — it returns `404` from the drive blob endpoint (see
+[training/README.md](training/README.md), "File artifacts"). Use the model store.
+
+Corollary for checkpoints: `log_model=True` only publishes at `logger.finalize()`,
+so a job that dies mid-run leaves **nothing** behind. That is what
+`--push_mid_run_every` exists for.
+
 ## Tooling
 
 **The `lightning` CLI on PATH in this Studio is stale** (`2026.04.23`, verb-first

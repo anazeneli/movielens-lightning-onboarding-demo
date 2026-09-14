@@ -10,6 +10,15 @@ data-prep (CPU)  ->  train (GPU)  ->  eval (GPU)  ->  serve (deployment)
 | File | Purpose |
 |---|---|
 | `lifecycle_pipeline.py` | Builds and launches the four-step pipeline. Each step picks its own machine; `--cron` attaches a native schedule; `--serve_studio` / `--serve_image` let the serving step come from a different repo or environment. |
+| `batch_inference_pipeline.py` | One step plus a `Schedule` — daily/recurring scoring over all users. Separate from the lifecycle pipeline because it has a different trigger and cadence. |
+
+> ⚠️ **A step's output is lost unless the step uploads it.** Every step runs on a
+> machine that is destroyed when it ends, and automatic artifact collection did
+> **not** surface a file written to `$LIGHTNING_ARTIFACTS_DIR` by a pipeline step
+> — it completed cleanly and the file was findable nowhere afterwards. Whatever a
+> step needs to outlive itself must be pushed explicitly to the model store or
+> the Drive. See [`serving/batch_inference.py`](../serving/batch_inference.py)
+> for the pattern.
 
 Run it:
 
