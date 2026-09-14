@@ -32,7 +32,7 @@ WORKFLOW = "train_movielens"
 # same hardware as the real sweep -- GPU image, driver and --precision 16
 # behaviour are all generation-specific. A single default, overridable in one
 # place, means the two can't drift apart.
-MACHINE = Machine.H100
+MACHINE = Machine.T4
 
 parser = argparse.ArgumentParser()
 parser.add_argument(

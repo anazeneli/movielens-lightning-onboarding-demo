@@ -24,7 +24,16 @@ import pathlib
 from datetime import datetime
 
 from lightning_sdk import Machine, Studio
-from lightning_sdk.pipeline import DeploymentReleaseStep, JobStep, Pipeline, Schedule
+from typing import List, Union
+
+from lightning_sdk.pipeline import (
+    DeploymentReleaseStep,
+    DeploymentStep,
+    JobStep,
+    MMTStep,
+    Pipeline,
+    Schedule,
+)
 
 PROJECT = "ml-100k"
 WORKFLOW = "train_movielens"
@@ -133,7 +142,7 @@ eval_cmd = (
     f"EXPERIMENT_NAME={experiment_name} python recommender_demo.py"
 )
 
-steps = [
+steps: List[Union[JobStep, DeploymentStep, MMTStep]] = [
     # Materialise the dataset once, on a CPU box, and fail the whole pipeline
     # here if the drive mount or the data is wrong -- rather than discovering it
     # after paying for a GPU to start.
@@ -209,7 +218,15 @@ if args.cron:
     ]
 
 pipeline_name = f"{PROJECT}-lifecycle-{run_id}"
-pipeline = Pipeline(name=pipeline_name, studio=studio)
+# shared_filesystem=False is REQUIRED on Lightning Cloud baremetal. Pipeline
+# defaults it to True, and the API then resolves a shared filesystem backend from
+# the step's cloud account -- it only implements AWS (s3_folder) and GCP
+# (gcs_folder), so a baremetal cluster raises
+# `NotImplementedError: This cluster isn't support yet` at create time.
+# We don't need it regardless: these steps hand off a model by registry name, not
+# files on a shared disk (see "The steps share a model, not a filesystem" in the
+# README).
+pipeline = Pipeline(name=pipeline_name, studio=studio, shared_filesystem=False)
 pipeline.run(steps=steps, schedules=schedules)
 
 print(f"Launched pipeline '{pipeline_name}'")
