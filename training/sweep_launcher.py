@@ -56,7 +56,11 @@ if args.smoke_test:
         f"--experiment_group {experiment_group} --experiment_name {experiment_name} "
         f"--sweep_id {sweep_id}"
     )
-    Job.run(name=job_name, machine=Machine.CPU, studio=studio, command=cmd)
+    # T4, not CPU: the point of the smoke test is to verify the path the REAL
+    # sweep takes, and that path is CUDA -- GPU image, driver, and --precision 16
+    # all go untested on a CPU box, so a CPU smoke test passes and the real run
+    # still fails. T4 is the cheapest machine that exercises it ($0.69/hr).
+    Job.run(name=job_name, machine=Machine.T4, studio=studio, command=cmd)
     print(f"Launched {job_name} → `{cmd}`")
     print(f"\nCheck this job's logs in the Jobs UI to confirm the remote path works "
           f"end to end, then rerun without --smoke_test for the real sweep.")
