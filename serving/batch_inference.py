@@ -106,6 +106,45 @@ def main():
     log(f"wrote {len(df)} rows ({num_users} users x top-{k}) -> {out_path}")
     print(df.head(10).to_string(index=False))
 
+    # Writing to $LIGHTNING_ARTIFACTS_DIR is not enough on its own: automatic
+    # artifact collection did not surface this file for a pipeline step (nothing
+    # appeared under lit://<owner>/<teamspace>/jobs/ afterwards). Explicitly
+    # uploading it is the reliable path -- it goes to the same model store the
+    # checkpoints use, which is proven to round-trip, and makes the output
+    # retrievable by NAME from anywhere:
+    #
+    #     lightning model download {owner}/{teamspace}/{OUTPUT_NAME}
+    #
+    # Set OUTPUT_NAME to disable/rename; each run adds a new version, so a
+    # nightly schedule builds a history rather than overwriting.
+    output_name = os.environ.get("OUTPUT_NAME")
+    if not output_name:
+        experiment = os.environ.get("EXPERIMENT_NAME")
+        output_name = f"{experiment}-recommendations" if experiment else "recommendations"
+
+    try:
+        from lightning_sdk import Studio
+        from litmodels import upload_model_files
+
+        teamspace = Studio().teamspace
+        full_name = f"{teamspace.owner.name}/{teamspace.name}/{output_name}"
+        upload_model_files(
+            name=full_name,
+            path=out_path,
+            progress_bar=False,
+            verbose=0,
+            metadata={
+                "rows": str(len(df)),
+                "users": str(num_users),
+                "top_k": str(k),
+            },
+        )
+        log(f"uploaded -> {full_name}")
+    except Exception as e:
+        # Don't fail a nightly job because the upload leg broke -- the Parquet is
+        # still on disk under the artifacts dir. Log loudly enough to notice.
+        log(f"WARNING: could not upload {out_path.name}: {e}")
+
 
 if __name__ == "__main__":
     main()
