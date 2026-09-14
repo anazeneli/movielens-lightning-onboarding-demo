@@ -12,10 +12,12 @@ from recsys.constants import RAW_DATA_DIR
 def log(msg):
     print(f"[RecSysAPI] {msg}", flush=True)
 
-# Seeded demo checkpoint, fixed to its origin teamspace (owner/teamspace/experiment_name)
-# rather than the current one -- unlike EXPERIMENT_NAME, this doesn't get
-# recombined with Studio().teamspace, since it must keep pointing at whatever
-# teamspace it was trained in, regardless of which teamspace the server runs in.
+# Placeholder, deliberately not a real checkpoint. Unlike EXPERIMENT_NAME this is
+# a full "owner/teamspace/experiment_name" and is NOT recombined with
+# Studio().teamspace, so whatever is set here points at one fixed teamspace.
+# Don't commit a real one: it leaks the owning org and teamspace into this public
+# repo. Set CHECKPOINT_NAME or EXPERIMENT_NAME instead -- resolution fails with
+# an explicit error telling you to do exactly that.
 DEFAULT_CHECKPOINT_NAME = "<owner>/<teamspace>/<experiment-name>"
 
 def _resolve_checkpoint():
