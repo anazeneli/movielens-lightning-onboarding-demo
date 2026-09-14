@@ -11,13 +11,103 @@ from urllib.parse import quote
 warnings.filterwarnings("ignore", message="LightningLogger does not support `log_graph`")
 
 import lightning as L
-from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
+from lightning.pytorch.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from lightning_sdk import Studio
 from litlogger import LightningLogger
+from litmodels import upload_model
 from recsys.movielens_datamodule import MovieLens100K
 from recsys.model import TwoTowerModel
 
 DATA_ROOT = os.environ.get("MOVIELENS_LITDATA_DIR", "/teamspace/lightning_storage/data/ml-100k-litdata")
+
+
+class PushCheckpointMidRun(Callback):
+    """Publish the best-so-far checkpoint to the model registry *during* training.
+
+    litlogger's log_model=True only registers at logger.finalize(), so while a
+    remote job is still running its weights can't be pulled: `lightning model
+    download` answers "Either the model doesn't exist or you don't have access
+    to it", and the job's Drive artifacts dir is an empty placeholder until the
+    job goes terminal.
+
+    This uploads ModelCheckpoint's current best under a separate "-live" name,
+    so the in-progress run is retrievable:
+
+        lightning model download {owner}/{teamspace}/{experiment_name}-live
+
+    Each push is a new version of that model, so you always get the latest by
+    pulling the name without a version suffix. The "-live" suffix keeps this
+    clear of the final log_model registration, which stays the canonical artifact.
+
+    Uploads ONLY on improvement. ModelCheckpoint rewrites `best_model_path` only
+    when its monitored metric improves, so comparing that path against the last
+    one uploaded is an exact "did this get better?" test -- no re-uploading an
+    unchanged file every epoch, which would otherwise spend a multi-MB upload and
+    a registry version per epoch to store the same bytes.
+
+    Note the gate follows whatever ModelCheckpoint monitors, which in this script
+    is `val_ap` (mode="max"), NOT `val_loss`. EarlyStopping is the callback
+    watching `val_loss`. To gate pushes on loss instead, change ckpt_cb's
+    monitor -- don't add a second criterion here, or the uploaded checkpoint and
+    the registered-at-finalize one stop being the same model.
+    """
+
+    def __init__(self, ckpt_cb, model_name, every_n_epochs=1):
+        self.ckpt_cb = ckpt_cb
+        self.model_name = model_name
+        self.every_n_epochs = every_n_epochs
+        self.n_pushed = 0
+        self._last_pushed_path = None
+
+    def on_validation_end(self, trainer, pl_module):
+        if trainer.sanity_checking or self.every_n_epochs <= 0:
+            return
+        # Only rank 0 uploads -- every rank holds the same best checkpoint, so
+        # letting all of them push would just race to write identical versions.
+        if not trainer.is_global_zero:
+            return
+        if (trainer.current_epoch + 1) % self.every_n_epochs:
+            return
+        path = self.ckpt_cb.best_model_path
+        if not path or not os.path.isfile(path):
+            return
+        # Unchanged path == the monitored metric did not improve since the last
+        # push. Nothing new to publish, so don't spend the upload.
+        if path == self._last_pushed_path:
+            return
+        score = self.ckpt_cb.best_model_score
+        score_str = f"{float(score):.4f}" if score is not None else "n/a"
+        try:
+            upload_model(
+                name=self.model_name,
+                model=path,
+                progress_bar=False,
+                verbose=0,
+                metadata={
+                    "epoch": str(trainer.current_epoch),
+                    "in_progress": "true",
+                    "monitor": str(self.ckpt_cb.monitor),
+                    "best_score": score_str,
+                },
+            )
+        except Exception as e:
+            # A failed mid-run push must never take the training run down with
+            # it -- the run's real output is the final log_model registration.
+            # Deliberately do NOT record _last_pushed_path here: leaving it unset
+            # means the next improvement-free epoch retries this same checkpoint
+            # rather than skipping it as already-published.
+            log(f"WARNING: mid-run checkpoint push failed at epoch {trainer.current_epoch}: {e}")
+        else:
+            self._last_pushed_path = path
+            self.n_pushed += 1
+            log(
+                f"pushed mid-run checkpoint (epoch {trainer.current_epoch}, "
+                f"{self.ckpt_cb.monitor}={score_str}) -> {self.model_name}"
+            )
+
+
+def log(msg):
+    print(f"[train] {msg}", flush=True)
 
 
 def main():
@@ -46,6 +136,13 @@ def main():
     parser.add_argument("--experiment_group", type=str, default="")
     parser.add_argument("--experiment_name", type=str, default="")
     parser.add_argument("--sweep_id", type=str, default="")
+    parser.add_argument(
+        "--push_mid_run_every", type=int, default=0,
+        help="Publish the best-so-far checkpoint to the model registry every N "
+             "validation epochs, under '{experiment_name}-live', so weights are "
+             "retrievable WHILE the run is still going (log_model=True alone only "
+             "registers at finalize). 0 (default) disables it.",
+    )
     parser.add_argument(
         "--smoke_test", action="store_true",
         help=(
@@ -133,6 +230,17 @@ def main():
         patience  = 10,
     )
 
+    # ── 4c) Mid-run checkpoint push (opt-in) ────────────────────────
+    # log_model=True only registers at finalize(), so without this the weights
+    # of a still-running remote job can't be pulled. See PushCheckpointMidRun.
+    callbacks = [ckpt_cb, early_stop_cb]
+    if args.push_mid_run_every > 0:
+        live_model_name = f"{teamspace.owner.name}/{teamspace_name}/{args.logger_name}-live"
+        callbacks.append(
+            PushCheckpointMidRun(ckpt_cb, live_model_name, args.push_mid_run_every)
+        )
+        log(f"mid-run pushes enabled every {args.push_mid_run_every} epoch(s) -> {live_model_name}")
+
     # ── 5) Trainer ──────────────────────────────────────────────────
     # --smoke_test only caps scale (1 epoch, 2 batches); the logger, callbacks,
     # and everything else stay identical to a real run -- see the --smoke_test
@@ -141,7 +249,7 @@ def main():
         accelerator       = "auto",
         devices           = "auto",
         precision         = args.precision,
-        callbacks         = [ckpt_cb, early_stop_cb],
+        callbacks         = callbacks,
         logger            = logger,
         log_every_n_steps = 20,
         check_val_every_n_epoch = 1,   # validate (and log val_* metrics) every epoch

@@ -65,8 +65,8 @@ if args.smoke_test:
 # Wider than the original ml100k-sweep grid: pushes past the range where lr
 # clearly hurts convergence on either end, so the sweep shows the tradeoff
 # curve instead of three similar-looking runs.
-learning_rates = [1e-5, 1e-4, 1e-3, 1e-2, 1e-1]
-batch_sizes    = [128, 256, 512]
+learning_rates = [1e-5] #, 1e-4, 1e-3, 1e-2, 1e-1]
+batch_sizes    = [128] #, 256, 512]
 sweep_id = f"{datetime.now():%Y%m%d-%H%M%S}"
 experiment_group = sweep_id
 
@@ -94,14 +94,15 @@ for idx, (lr, bs) in enumerate(grid):
         f"--sweep_id {sweep_id}"
     )
 
-    # Machine.CPU keeps this sweep free -- swap for Machine.H100 (or any other
-    # Machine option) once you're past a dry run and want the real timings.
+    # Machine.T4 is the default here deliberately: the full grid is 15 jobs, and
+    # 15 concurrent H100s bills roughly $67/hr. Swap to Machine.H100 when you
+    # want real timings (or to show on-demand H100 access) -- just don't leave
+    # it there with the grid uncommented.
     # NOTE: lightning_sdk's Job.run() replaces the old
     # Studio.install_plugin('jobs') API, which no longer exists in this
     # SDK version -- machine= is now required, there's no implicit
     # "current machine" default.
-    # NOTE: this is set to CPU not H100 for savings during testing
-    Job.run(name=job_name, machine=Machine.CPU, studio=studio, command=cmd)
+    Job.run(name=job_name, machine=Machine.T4, studio=studio, command=cmd)
 
     print(f"Launched {job_name} → `{cmd}`")
 

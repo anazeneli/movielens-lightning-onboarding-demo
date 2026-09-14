@@ -10,10 +10,12 @@
 !.gitignore
 !.lightningignore
 !README.md
+!CLAUDE.md
 !pyproject.toml
 !recsys/
 !training/
 !serving/
+!pipelines/
 !scratch.ipynb
 
 # 3) Un-ignore files inside those directories (the "*" rule above also blocks
@@ -21,6 +23,7 @@
 !recsys/**
 !training/**
 !serving/**
+!pipelines/**
 
 # 4) Re-ignore anything heavy/generated that might land inside the allowed dirs
 __pycache__/
