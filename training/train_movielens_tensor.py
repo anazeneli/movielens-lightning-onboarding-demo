@@ -27,10 +27,13 @@ def main():
     args = parser.parse_args()
 
     # ── 2) LitLogger setup ─────────────────────────────────────────
+    # checkpoint_name pins the registry name to logger_name -- see
+    # train_movielens.py for why the experiment name can't be used.
     logger = LightningLogger(
-        name      = args.logger_name,
-        teamspace = args.teamspace,
-        log_model = True
+        name            = args.logger_name,
+        teamspace       = args.teamspace,
+        log_model       = True,
+        checkpoint_name = args.logger_name,
     )
     # Log any metadata you like
     logger.log_metadata({

@@ -44,9 +44,15 @@ directory is an empty placeholder until the job is terminal. `train_movielens.py
 has an opt-in `--push_mid_run_every N` callback that publishes the best-so-far
 checkpoint under a `-live` name if you need mid-run retrieval.
 
-**Nothing is ever overwritten, and names are get-or-create.** Reusing an exact
-`--logger_name` reuses the *same* experiment, so metrics from separate runs
-collide in it. Every job needs a unique name.
+**The platform timestamps experiment names; the registry name is pinned
+separately.** An experiment created as `ml100k-best` is stored as
+`ml100k-best-2026-09-14T15-24-53.766+00-00` — the suffix is added server-side, so
+no client change removes it, and the bare name does not resolve. That used to
+make the registered checkpoint unfindable by name. Both train scripts now pass
+`checkpoint_name=args.logger_name` to `LightningLogger`, which pins the *model
+registry* name to the flat name you chose, so `EXPERIMENT_NAME=ml100k-best`
+resolves in serving. Drop that argument and serving breaks. To find an
+experiment's real stored name, list it — don't reconstruct it.
 
 **Jobs can't write into the live Studio filesystem.** A studio job's outputs go
 to home (`$LIGHTNING_ARTIFACTS_DIR`) and surface afterwards under
@@ -86,23 +92,41 @@ so a job that dies mid-run leaves **nothing** behind. That is what
 
 ## Tooling
 
-**The `lightning` CLI on PATH in this Studio is stale** (`2026.04.23`, verb-first
-`lightning run job`). Current is `2026.9.3`, noun-first (`lightning job run`,
-`lightning deployment create`, `lightning model download`) — the old build
-doesn't have those subcommands at all. Use the current CLI without touching the
-environment:
+The `lightning` CLI on PATH is **2026.9.3**, noun-first (`lightning job run`,
+`lightning model download`). `lai` is aliased to it. Earlier revisions of this
+file warned about a stale `2026.04.23` verb-first build and told you to reach for
+`uvx --from lightning-sdk` — that no longer applies, and neither does the old
+"don't upgrade lightning-sdk" advice: the SDK is current and the training path
+works on it.
 
-```bash
-uvx --from lightning-sdk lightning <command>
-```
+Pipelines are **SDK-only**: `lightning pipeline` exposes only `logs` (and it
+needs a STEP name, not just the pipeline). Build them in Python (`from
+lightning_sdk.pipeline import Pipeline, JobStep, DeploymentReleaseStep,
+Schedule`). Pipeline steps do **not** appear in `lightning job list` — read them
+with `lightning pipeline logs <pipeline> <step>`.
 
-**Do not blind-upgrade `lightning-sdk` in this Studio.** The environment has a
-pinned `litlogger` that the training path depends on. The *Python SDK* works fine
-on the installed version — only the CLI is behind.
+### Skills
 
-Pipelines are **SDK-only**: `lightning pipeline` exposes just `logs`, with no
-`create`/`run`/`list`. Build them in Python (`from lightning_sdk.pipeline import
-Pipeline, JobStep, DeploymentReleaseStep, Schedule`).
+Lightning skills are installed for this repo (`.claude/skills/`, symlinked from
+`.agents/skills/`). They load at session start — install one mid-session and you
+must restart before `Skill` can invoke it.
+
+| Skill | Use it for |
+|---|---|
+| `lightning-jobs` | Launch/monitor jobs and MMT, logs, SSH, artifacts. The one this repo leans on most. |
+| `lightning-studios` | Create/start/stop Studios, switch machine types, upload files. |
+| `lightning-deployments` | Long-lived autoscaled endpoints (what `DeploymentReleaseStep` cuts a release of). |
+| `lightning-cost-estimation` | Live per-hour machine prices before committing to a sweep or a GPU tier. |
+| `lightning-artifacts` | Publish a local file as a durable public `lightning.ai/artifacts/<id>` link. |
+| `lightning-llm-gateway` | Hosted LLM calls + the teamspace model checkpoint registry. |
+| `lightning-sandboxes` | Throwaway isolated VMs for untrusted or experimental code. |
+| `lightning-blog` | Drafting/publishing on the Lightning blog (needs the blog-admin flag). |
+| `find-skills` | Discover and install further skills. |
+
+Two gotchas from `lightning-jobs` that bit this repo directly:
+`lightning job inspect` does **not** emit parseable JSON (it wraps long values
+mid-string) — use `lightning job list --json`; and `--query`/`--severity` on a
+*finished* job can silently return zero lines, so fetch unfiltered and `grep`.
 
 ## Cost awareness
 

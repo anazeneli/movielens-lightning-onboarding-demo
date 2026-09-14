@@ -169,11 +169,16 @@ def main():
     teamspace = Studio().teamspace
     teamspace_name = teamspace.name
 
-    # Initialize litlogger
+    # Initialize litlogger.
+    # checkpoint_name pins the registry name to logger_name. Without it the
+    # checkpoint registers under the *experiment* name, which the platform
+    # timestamps on creation (ml100k-best -> ml100k-best-2026-09-14T15-24-53.766+00-00),
+    # so serving could never reconstruct the name it was stored under.
     logger = LightningLogger(
         name=args.logger_name,
         teamspace=teamspace_name,
-        log_model=True
+        log_model=True,
+        checkpoint_name=args.logger_name,
     )
 
     # Log metadata
