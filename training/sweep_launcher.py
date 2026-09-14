@@ -27,14 +27,37 @@ from lightning_sdk import Studio, Job, Machine
 PROJECT = "ml-100k"
 WORKFLOW = "train_movielens"
 
+# One machine for both the smoke test and the grid, deliberately. The smoke test
+# exists to rule out "it passed there and failed here", so it has to run on the
+# same hardware as the real sweep -- GPU image, driver and --precision 16
+# behaviour are all generation-specific. A single default, overridable in one
+# place, means the two can't drift apart.
+MACHINE = Machine.H100
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--smoke_test", action="store_true",
     help="Launch a single remote job running train_movielens.py --smoke_test "
          "instead of the full grid -- verifies the remote job path (absolute "
-         "repo path, recsys install, litlogger) before spending on the real sweep.",
+         "repo path, recsys install, litlogger) before spending on the real sweep. "
+         "Runs on the same machine as the real sweep, so it actually proves that path.",
+)
+parser.add_argument(
+    "--machine", default=None,
+    help=f"Override the machine for this launch (default: {MACHINE}). Applies to "
+         f"the smoke test and the grid alike, so they always match. e.g. T4, L4, "
+         f"A100, H100, H100_X_8. The full grid is 15 jobs, so the machine you "
+         f"pick here is billed 15 times over -- T4 shows the same parallelism far "
+         f"more cheaply than H100.",
 )
 args = parser.parse_args()
+
+# Resolve once and echo it, so what's about to be billed is never a surprise --
+# especially with --machine, where the default in the file no longer tells you
+# what's running.
+machine = Machine.from_str(args.machine) if args.machine else MACHINE
+source = "--machine" if args.machine else "default MACHINE"
+print(f"Machine: {machine}  (from {source})")
 
 studio = Studio()
 
@@ -56,11 +79,7 @@ if args.smoke_test:
         f"--experiment_group {experiment_group} --experiment_name {experiment_name} "
         f"--sweep_id {sweep_id}"
     )
-    # T4, not CPU: the point of the smoke test is to verify the path the REAL
-    # sweep takes, and that path is CUDA -- GPU image, driver, and --precision 16
-    # all go untested on a CPU box, so a CPU smoke test passes and the real run
-    # still fails. T4 is the cheapest machine that exercises it ($0.69/hr).
-    Job.run(name=job_name, machine=Machine.T4, studio=studio, command=cmd)
+    Job.run(name=job_name, machine=machine, studio=studio, command=cmd)
     print(f"Launched {job_name} → `{cmd}`")
     print(f"\nCheck this job's logs in the Jobs UI to confirm the remote path works "
           f"end to end, then rerun without --smoke_test for the real sweep.")
@@ -75,6 +94,7 @@ sweep_id = f"{datetime.now():%Y%m%d-%H%M%S}"
 experiment_group = sweep_id
 
 grid = [(lr, bs) for lr in learning_rates for bs in batch_sizes]
+print(f"Launching {len(grid)} job(s) on {machine} -- each is billed separately.\n")
 
 for idx, (lr, bs) in enumerate(grid):
     # Flat, slash-free name (see header) -- also what log_model registers under.
@@ -98,15 +118,11 @@ for idx, (lr, bs) in enumerate(grid):
         f"--sweep_id {sweep_id}"
     )
 
-    # Machine.T4 is the default here deliberately: the full grid is 15 jobs, and
-    # 15 concurrent H100s bills roughly $67/hr. Swap to Machine.H100 when you
-    # want real timings (or to show on-demand H100 access) -- just don't leave
-    # it there with the grid uncommented.
     # NOTE: lightning_sdk's Job.run() replaces the old
     # Studio.install_plugin('jobs') API, which no longer exists in this
     # SDK version -- machine= is now required, there's no implicit
     # "current machine" default.
-    Job.run(name=job_name, machine=Machine.T4, studio=studio, command=cmd)
+    Job.run(name=job_name, machine=machine, studio=studio, command=cmd)
 
     print(f"Launched {job_name} → `{cmd}`")
 
