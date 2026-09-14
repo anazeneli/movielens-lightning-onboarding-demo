@@ -17,8 +17,37 @@ deliberately small so the platform mechanics stay visible.
 | `serving/` | LitServe API, Streamlit UI, standalone demo | [serving/README.md](serving/README.md) |
 | `pipelines/` | Full lifecycle as one ordered, schedulable pipeline | [pipelines/README.md](pipelines/README.md) |
 
-Setup is `pip install -e .` plus the one-time data steps in
-[training/README.md](training/README.md).
+## First-time setup
+
+Run in order. Every step is idempotent — re-running a satisfied step prints
+"nothing to do" rather than redoing work.
+
+```bash
+pip install -e .                    # installs recsys + the deps the base image lacks
+python training/fetch_data.py       # raw ml-100k -> shared drive (MD5-verified)
+python training/optimize_data.py    # LitData chunks + stats.json (--force to rebuild)
+python training/train_movielens.py --smoke_test    # end-to-end check, ~30s, CPU
+```
+
+**Prerequisite the scripts cannot do for you:** the data lands on a *teamspace
+folder* mounted at `/teamspace/lightning_storage/<name>/`, and `.../data/` must
+already exist. `/teamspace/lightning_storage/` itself is **not writable** — only
+its mounted subfolders are — so if `ls /teamspace/lightning_storage/data` fails,
+create the folder first (it mounts within ~60s, no Studio restart):
+
+```python
+from lightning_sdk import Teamspace
+Teamspace(name="<teamspace>", org="<owner>").new_folder("data")
+```
+
+The mount root is `lightning_storage`, not the `folders` that `new_folder`'s
+docstring claims. If your mount differs, override `MOVIELENS_DATA_DIR` /
+`MOVIELENS_LITDATA_DIR` rather than editing `recsys/constants.py`.
+
+Setup is correct when the smoke test prints `Smoke test passed` and the run
+appears in the teamspace's experiments. Duplicating a Studio that is already set
+up carries the installed environment with it, and the data folder is
+teamspace-scoped, so a duplicate inside the same teamspace needs none of this.
 
 ## Constraints that will bite you
 
