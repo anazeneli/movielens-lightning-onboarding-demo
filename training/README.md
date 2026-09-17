@@ -76,10 +76,11 @@ accumulates in the studio; everything is viewable in the Lightning UI under
 
 **1. Create the experiment.**
 ```python
-logger = LightningLogger(name=args.logger_name, teamspace=..., log_model=True)
+logger = LightningLogger(name=args.logger_name, teamspace=..., log_model=False)
 ```
-`log_model=True` is the key flag — it tells the logger to upload checkpoints as
-model artifacts (see step 4).
+`log_model=False` is deliberate: it's what lets `logger_name` stay nested for
+folder hierarchy. We upload the checkpoint ourselves instead (see step 4 and
+"Grouping experiments").
 
 **2. Log run metadata (hyperparameters).**
 ```python
@@ -96,14 +97,20 @@ Then every `self.log("val_ap", ...)` / `self.log("train_loss", ...)` in
 locally, and uploaded to the experiment manager in rate-limited batches** (so
 it doesn't hammer the API every step).
 
-**4. Log the model checkpoint.** Because `log_model=True`, the logger registers
-an `after_save_checkpoint` hook. When `ModelCheckpoint` saves the best model
-(`save_top_k=1`), the logger **uploads that `.ckpt` to the experiment manager /
-model registry** (via `litmodels.upload_model`). With `save_top_k=1` the upload
-is deferred until `finalize()` (step 6). We deliberately set **no `dirpath`** on
-`ModelCheckpoint`, so the checkpoint stages in a transient run dir and never
-lands in a persisted `checkpoints/` folder — the uploaded copy is the source of
-truth. Pull it back later with `litmodels.download_model`.
+**4. Log the model checkpoint.** After `fit()` returns, the script uploads
+`ckpt_cb.best_model_path` to the model registry itself, via
+`litmodels.upload_model(name=f"{owner}/{teamspace}/{args.checkpoint_name}", ...)`.
+This is work `log_model=True` would otherwise do at `finalize()` — we take it
+over so the registry gets the flat name while the experiment keeps its nested
+one. We deliberately set **no `dirpath`** on `ModelCheckpoint`, so the checkpoint
+stages in a transient run dir and never lands in a persisted `checkpoints/`
+folder — the uploaded copy is the source of truth. Pull it back later with
+`litmodels.download_model`.
+
+The upload is **not** wrapped in `try/except`: it's the run's real output, so a
+failure has to fail the run rather than exit 0 with nothing published. (The
+opt-in `--push_mid_run_every` callback *is* guarded — a mid-run convenience push
+must never take a healthy run down.)
 
 Verified with a real run (`--logger_name smoke-test`, 2 epochs): only one file
 was uploaded — the single best-`val_ap` checkpoint, not one per epoch — and
@@ -157,38 +164,61 @@ survive.
 ## Grouping experiments
 
 litlogger's public API only documents a flat `name` -- no `folder`/`group`
-parameter. An earlier version abused a **slash-delimited `--logger_name`** to
-fake folder hierarchy in the UI, but with `log_model=True` litlogger registers
-the best checkpoint in the model registry *under the experiment name*,
-recombined as `{owner}/{teamspace}/{name}`. The registry uses `/` only as the
-`owner/teamspace/model_name` delimiter, so a multi-slash name is unparseable
-and the checkpoint upload fails:
+parameter -- but a **slash-delimited name renders as real folder hierarchy** in
+the experiment manager. That's what `--logger_name` uses:
+
+```text
+--logger_name = {project}/{workflow}/{sweep_id}/lr{lr}-bs{bs}
+       example = ml-100k/train_movielens/20260706-192010/lr0.01-bs256
+```
+
+### The catch: the registry can't take that name
+
+With `log_model=True`, litlogger registers the best checkpoint in the model
+registry *under the experiment name*, recombined as `{owner}/{teamspace}/{name}`.
+The registry uses `/` only as the `owner/teamspace/model_name` delimiter, so a
+nested name arrives as 6 parts instead of 3 and the upload fails:
 
 ```text
 ValueError: Model name must be in the format `organization/teamspace/model_name`
 ```
 
-So `--logger_name` is now a single flat, hyphen-delimited segment; grouping is
-by shared **name prefix** instead of folders:
+This is why folders were stripped out of this repo once already (`94bb4e7`), and
+why they're back now: the fix is to **decouple the two names** rather than
+flatten the experiment.
+
+- `train_movielens.py` sets **`log_model=False`** and uploads the best checkpoint
+  itself, after `fit()`, via `litmodels.upload_model`.
+- It registers under `--checkpoint_name`, which defaults to `--logger_name`
+  flattened (`/` → `-`) by `recsys.constants.registry_name()`.
+- `serving/server.py` runs `EXPERIMENT_NAME` through the same function, so you
+  can paste a nested experiment name straight from the UI and it resolves.
 
 ```text
---logger_name = {project}-{sweep_id}-lr{lr}-bs{bs}
-       example = ml-100k-20260706-192010-lr0.01-bs256
+experiment (UI, nested)  ml-100k/train_movielens/20260706-192010/lr0.01-bs256
+registry   (flat)        ml-100k-train_movielens-20260706-192010-lr0.01-bs256
 ```
 
-`sweep_launcher.py` still passes each piece down as its own CLI flag, logged as
-metadata -- so everything stays filterable/searchable regardless of the name:
+> **Don't use `LightningLogger(checkpoint_name=...)` for this.** It looks like
+> exactly the right knob and is a no-op: in litlogger 2026.8.28 it's assigned at
+> `logger.py:435` and never read, so the registry name still comes from
+> `Experiment.name`. A previous revision of this repo relied on it.
+
+`sweep_launcher.py` also passes each piece down as its own CLI flag, logged as
+metadata -- so everything stays filterable/searchable independently of the
+folder view:
 
 | Flag | Meaning | Example |
 |---|---|---|
-| `--project` | The broader body of work; leads the name prefix. | `ml-100k` |
-| `--workflow` | The repeatable code path (provenance metadata; not in the name). | `train_movielens` |
-| `--experiment_group` | One sweep -- all jobs from one `sweep_launcher.py` invocation share this `sweep_id`; second part of the name prefix. | `20260706-192010` |
-| `--experiment_name` | This one job's full flat name (== `--logger_name`). | `ml-100k-20260706-192010-lr0.01-bs256` |
+| `--project` | The broader body of work; first folder segment. | `ml-100k` |
+| `--workflow` | The repeatable code path; second folder segment. | `train_movielens` |
+| `--experiment_group` | One sweep -- all jobs from one `sweep_launcher.py` invocation share this `sweep_id`; third folder segment. | `20260706-192010` |
+| `--experiment_name` | This one job's full nested name (== `--logger_name`). | `ml-100k/train_movielens/20260706-192010/lr0.01-bs256` |
+| `--checkpoint_name` | Flattened registry name for the checkpoint. | `ml-100k-train_movielens-20260706-192010-lr0.01-bs256` |
 | `--sweep_id` | Same value as `experiment_group`. | `20260706-192010` |
 
-All of a sweep's runs share the `{project}-{sweep_id}-` prefix, so filter/sort
-by it in the experiment manager to compare them.
+All of a sweep's runs sit in the `{project}/{workflow}/{sweep_id}/` folder, so
+open it in the experiment manager to compare them.
 
 **Responsibility split:**
 - `train_movielens.py` owns one experiment -- its own config, metrics, and
@@ -196,25 +226,28 @@ by it in the experiment manager to compare them.
   (default `ml-100k`), `--workflow` (default `train_movielens`),
   `--experiment_group`, `--experiment_name`, and `--sweep_id` (all default to
   `""`, unset) are just logged as metadata, whatever they're set to. If
-  `--logger_name` isn't given either, it defaults to a flat
-  `run-lr<lr>-bs<batch_size>` (or `run-smoke-test` for `--smoke_test`), since a
+  `--logger_name` isn't given either, it defaults to
+  `<project>/<workflow>/run-lr<lr>-bs<batch_size>` (or `.../run-smoke-test` for
+  `--smoke_test`) -- still foldered, just without a sweep segment, since a
   standalone run has no experiment group.
   **It has no dependency on `sweep_launcher.py`** -- no import, no requirement
   that it's running -- so it's a complete, standalone experiment either way.
 - `sweep_launcher.py` owns the grouping: it generates one `sweep_id` per
-  invocation (a timestamp) and builds a flat, unique `--logger_name` per job,
-  `{project}-{sweep_id}-lr<lr>-bs<batch_size>` -- every lr/batch_size combo in
-  the grid is unique, so the full string is unique within the sweep. It sets
-  `--experiment_name` to that same string and passes all of it down as plain
-  CLI args -- the only thing connecting the two scripts.
+  invocation (a timestamp) and builds a unique nested `--logger_name` per job,
+  `{project}/{workflow}/{sweep_id}/lr<lr>-bs<batch_size>` -- every lr/batch_size
+  combo in the grid is unique, so the leaf is unique within the sweep folder. It
+  sets `--experiment_name` to that same string, derives `--checkpoint_name` from
+  it, and passes all of it down as plain CLI args -- the only thing connecting
+  the two scripts.
 
 A few things worth knowing:
 
-- **Naming convention:** experiment names are flat and hyphen-delimited --
-  `{project}-{sweep_id}-lr..-bs..` for sweep jobs, `run-lr..-bs..` (or
-  `run-smoke-test`) for standalone `train_movielens.py` runs. The **Jobs** UI
-  label (a separate system from experiments) is `sweep-<experiment_name>` and is
-  never used as a `--logger_name`.
+- **Naming convention:** experiment names are nested and slash-delimited --
+  `{project}/{workflow}/{sweep_id}/lr..-bs..` for sweep jobs,
+  `{project}/{workflow}/run-lr..-bs..` (or `.../run-smoke-test`) for standalone
+  `train_movielens.py` runs. The **Jobs** UI label (a separate system from
+  experiments) has to be flat, so it's `sweep-<checkpoint_name>` and is never
+  used as a `--logger_name`.
 - **Nothing is ever overwritten.** litlogger does a strict get-or-create keyed
   on the full `--logger_name` string -- reusing one exactly reuses the *same*
   experiment (metrics/steps from different runs collide in it), so every job's
@@ -226,7 +259,7 @@ A few things worth knowing:
   launch jobs with different `machine=` values yourself, keeping the same
   `experiment_group`.
 - **Local/standalone runs** default to `experiment_group=""` -- a real
-  experiment, just not part of a sweep's prefix group.
+  experiment, just not inside a sweep folder.
 - **Smoke tests** get their own `experiment_group` (a fresh timestamp for
   `sweep_launcher.py --smoke_test`, so repeated smoke tests don't collide) and
   `run-smoke-test` for direct local smoke tests.

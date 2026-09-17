@@ -53,35 +53,47 @@ teamspace-scoped, so a duplicate inside the same teamspace needs none of this.
 
 These are all load-bearing. Each one was learned by breaking it.
 
-**Experiment names must be a single flat segment with no `/`.** With
-`log_model=True`, litlogger registers the checkpoint under the experiment name,
-recombined as `{owner}/{teamspace}/{name}`. The registry uses `/` only as its own
-delimiter, so a slashed name is unparseable and the checkpoint upload fails with
+**The experiment name and the registry name are two different strings.**
+Experiment names are nested — `{project}/{workflow}/{sweep_id}/{leaf}` — and each
+`/` segment renders as a folder in the experiment manager. The **model registry**
+cannot take that name: it parses `/` as its own `owner/teamspace/model_name`
+delimiter, so a nested name arrives as 6 parts instead of 3 and upload fails with
 `ValueError: Model name must be in the format 'organization/teamspace/model_name'`.
-Group runs by shared **name prefix**, not by folder hierarchy.
+
+So checkpoints register under the **flattened** name (`/` → `-`), produced by
+`recsys.constants.registry_name()`, which training and serving both call so they
+can't disagree. That decoupling is only possible with **`log_model=False`**: with
+`log_model=True` litlogger registers the checkpoint under `Experiment.name`
+itself, and the nested name blows up the upload. `train_movielens.py` therefore
+sets `log_model=False` and uploads the best checkpoint explicitly via
+`litmodels.upload_model` after `fit()`.
+
+`LightningLogger(checkpoint_name=...)` looks like it solves this and **does
+not**. In litlogger 2026.8.28 it is assigned at `logger.py:435` and never read
+again — the registry name always comes from `Experiment.name`. An earlier
+revision of this file claimed it pinned the registry name and that dropping it
+would break serving; both were wrong, and the argument has been removed.
 
 **Remote jobs run with cwd = studio root, not the repo.** Any path handed to a
 job must be absolute. Both `training/sweep_launcher.py` and
 `pipelines/lifecycle_pipeline.py` resolve `REPO_ROOT` from `__file__` for this
 reason. A relative path works locally and fails remotely.
 
-**Checkpoints upload at `finalize()`, not during the run.** With `save_top_k=1`
-the upload is deferred, so a *running* job's weights are not in the registry —
+**Checkpoints upload after `fit()`, not during the run.** Metrics stream as the
+run proceeds, but the checkpoint is published once at the end, so a *running*
+job's weights are not in the registry —
 `lightning model download` on an in-progress run returns "Either the model
 doesn't exist or you don't have access to it", and the job's Drive artifacts
 directory is an empty placeholder until the job is terminal. `train_movielens.py`
 has an opt-in `--push_mid_run_every N` callback that publishes the best-so-far
 checkpoint under a `-live` name if you need mid-run retrieval.
 
-**The platform timestamps experiment names; the registry name is pinned
-separately.** An experiment created as `ml100k-best` is stored as
+**The platform may timestamp the displayed experiment name.** An experiment
+created as `ml100k-best` has been observed stored as
 `ml100k-best-2026-09-14T15-24-53.766+00-00` — the suffix is added server-side, so
-no client change removes it, and the bare name does not resolve. That used to
-make the registered checkpoint unfindable by name. Both train scripts now pass
-`checkpoint_name=args.logger_name` to `LightningLogger`, which pins the *model
-registry* name to the flat name you chose, so `EXPERIMENT_NAME=ml100k-best`
-resolves in serving. Drop that argument and serving breaks. To find an
-experiment's real stored name, list it — don't reconstruct it.
+no client change removes it. This does **not** affect the registry name: that is
+built client-side from `--checkpoint_name`, which never leaves the process. To
+find an experiment's real stored name, list it — don't reconstruct it.
 
 **Jobs can't write into the live Studio filesystem.** A studio job's outputs go
 to home (`$LIGHTNING_ARTIFACTS_DIR`) and surface afterwards under
@@ -103,7 +115,7 @@ Anything you need after the run must be **explicitly pushed** to durable storage
 
 | What | How | Example |
 |---|---|---|
-| Model checkpoints | `log_model=True`, or `litmodels.upload_model` | `train_movielens.py` |
+| Model checkpoints | `litmodels.upload_model` (explicit, after `fit()`) | `train_movielens.py` |
 | Arbitrary output files | `litmodels.upload_model_files` | `serving/batch_inference.py` |
 | Metrics / params | litlogger — uploads as the run proceeds | `train_movielens.py` |
 | Ad-hoc files | `lightning cp <file> lit://<owner>/<teamspace>/uploads/<path>` | — |
@@ -115,8 +127,8 @@ Note litlogger's `log_file` artifact API is **not** a working route in this
 teamspace — it returns `404` from the drive blob endpoint (see
 [training/README.md](training/README.md), "File artifacts"). Use the model store.
 
-Corollary for checkpoints: `log_model=True` only publishes at `logger.finalize()`,
-so a job that dies mid-run leaves **nothing** behind. That is what
+Corollary for checkpoints: the checkpoint upload only happens after `fit()`
+returns, so a job that dies mid-run leaves **nothing** behind. That is what
 `--push_mid_run_every` exists for.
 
 ## Tooling

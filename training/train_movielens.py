@@ -15,6 +15,7 @@ from lightning.pytorch.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from lightning_sdk import Studio
 from litlogger import LightningLogger
 from litmodels import upload_model
+from recsys.constants import registry_name
 from recsys.movielens_datamodule import MovieLens100K
 from recsys.model import TwoTowerModel
 
@@ -125,9 +126,18 @@ def main():
     # Logger settings
     parser.add_argument(
         "--logger_name", type=str, default=None,
-        help="This run's experiment name. Defaults to run-lr<lr>-bs<batch_size> "
-             "(or run-smoke-test for --smoke_test); sweep_launcher.py overrides this with "
-             "its own sweep-* naming.",
+        help="This run's experiment name. May contain '/' -- every segment becomes a "
+             "folder in the experiment manager. Defaults to "
+             "<project>/<workflow>/run-lr<lr>-bs<batch_size> (or .../run-smoke-test "
+             "for --smoke_test); sweep_launcher.py overrides this with its own "
+             "<project>/<workflow>/<sweep_id>/ naming.",
+    )
+    parser.add_argument(
+        "--checkpoint_name", type=str, default=None,
+        help="Model-registry name for this run's best checkpoint -- the string "
+             "serving resolves (EXPERIMENT_NAME/CHECKPOINT_NAME). Defaults to "
+             "--logger_name flattened ('/' -> '-'). Must be a single flat segment: "
+             "the registry parses '/' as its own owner/teamspace/name delimiter.",
     )
     # Grouping metadata -- sweep_launcher.py sets these so many experiments can
     # be filtered/compared as one sweep; this script just logs whatever it's given.
@@ -159,10 +169,12 @@ def main():
     )
     args = parser.parse_args()
     if args.logger_name is None:
-        args.logger_name = (
-            "run-smoke-test" if args.smoke_test
-            else f"run-lr{args.lr}-bs{args.batch_size}"
-        )
+        # Nested by default, so even a standalone run lands under a
+        # project/workflow folder rather than loose at the top level.
+        leaf = "run-smoke-test" if args.smoke_test else f"run-lr{args.lr}-bs{args.batch_size}"
+        args.logger_name = f"{args.project}/{args.workflow}/{leaf}"
+    if args.checkpoint_name is None:
+        args.checkpoint_name = registry_name(args.logger_name)
 
     # ── 2) Logger setup ─────────────────────────────────────────
     # Resolve the current teamspace from the Lightning SDK instead of hardcoding
@@ -170,15 +182,22 @@ def main():
     teamspace_name = teamspace.name
 
     # Initialize litlogger.
-    # checkpoint_name pins the registry name to logger_name. Without it the
-    # checkpoint registers under the *experiment* name, which the platform
-    # timestamps on creation (ml100k-best -> ml100k-best-2026-09-14T15-24-53.766+00-00),
-    # so serving could never reconstruct the name it was stored under.
+    #
+    # log_model=False is deliberate, and is the whole reason logger_name can
+    # carry "/" for folder hierarchy. With log_model=True litlogger registers the
+    # checkpoint under the *experiment* name (Experiment.name, recombined as
+    # "{owner}/{teamspace}/{name}"), and the registry rejects a nested one. We
+    # publish the best checkpoint ourselves in step 7 under the flat
+    # args.checkpoint_name instead, which decouples the two names.
+    #
+    # Do NOT reach for LightningLogger's own checkpoint_name= argument to do
+    # this: in litlogger 2026.8.28 it is assigned and never read again
+    # (logger.py:435 sets it, nothing consumes it), so the registry name still
+    # comes from Experiment.name and a nested experiment still fails to upload.
     logger = LightningLogger(
         name=args.logger_name,
         teamspace=teamspace_name,
-        log_model=True,
-        checkpoint_name=args.logger_name,
+        log_model=False,
     )
 
     # Log metadata
@@ -192,6 +211,7 @@ def main():
         "precision": args.precision,
         "data_dir": DATA_ROOT, 
         "smoke_test": args.smoke_test,
+        "checkpoint_name": args.checkpoint_name,
         "project": args.project,
         "workflow": args.workflow,
         "experiment_group": args.experiment_group,
@@ -217,8 +237,8 @@ def main():
 
     # ── 4) Checkpoint callback ──────────────────────────────────────
     # No dirpath: checkpoints stage under the logger's run dir (transient on the
-    # job machine) and litlogger (log_model=True) uploads the best one to the
-    # experiment manager, so it survives the ephemeral remote machine.
+    # job machine) and step 7 uploads the best one to the model registry, so it
+    # survives the ephemeral remote machine.
     ckpt_cb = ModelCheckpoint(
         filename     = "ml100k-{epoch:02d}-{val_ap:.2f}",
         monitor      = "val_ap",
@@ -236,11 +256,12 @@ def main():
     )
 
     # ── 4c) Mid-run checkpoint push (opt-in) ────────────────────────
-    # log_model=True only registers at finalize(), so without this the weights
-    # of a still-running remote job can't be pulled. See PushCheckpointMidRun.
+    # The step-7 upload only happens once the run finishes, so without this the
+    # weights of a still-running remote job can't be pulled. See
+    # PushCheckpointMidRun.
     callbacks = [ckpt_cb, early_stop_cb]
     if args.push_mid_run_every > 0:
-        live_model_name = f"{teamspace.owner.name}/{teamspace_name}/{args.logger_name}-live"
+        live_model_name = f"{teamspace.owner.name}/{teamspace_name}/{args.checkpoint_name}-live"
         callbacks.append(
             PushCheckpointMidRun(ckpt_cb, live_model_name, args.push_mid_run_every)
         )
@@ -269,13 +290,39 @@ def main():
     trainer.fit(model, datamodule=dm)
     print("✅ Best checkpoint:", ckpt_cb.best_model_path)
 
-    # ── 7) Finalize logger ─────────────────────────────────────────
+    # ── 7) Publish the best checkpoint, then finalize ──────────────
+    # This is the work log_model=True used to do inside finalize(). We do it by
+    # hand so the checkpoint registers under the flat args.checkpoint_name while
+    # the experiment keeps its nested, folder-rendering name (see step 2).
+    #
+    # Deliberately NOT wrapped in try/except, unlike the mid-run push: this
+    # upload is the run's real output, so a failure here must fail the run
+    # rather than let it exit 0 with nothing published.
+    ckpt_model_name = f"{teamspace.owner.name}/{teamspace_name}/{args.checkpoint_name}"
+    if ckpt_cb.best_model_path and os.path.isfile(ckpt_cb.best_model_path):
+        score = ckpt_cb.best_model_score
+        upload_model(
+            name=ckpt_model_name,
+            model=ckpt_cb.best_model_path,
+            progress_bar=False,
+            verbose=0,
+            metadata={
+                "experiment": args.logger_name,
+                "monitor": str(ckpt_cb.monitor),
+                "best_score": f"{float(score):.4f}" if score is not None else "n/a",
+                "sweep_id": args.sweep_id,
+            },
+        )
+        log(f"registered best checkpoint -> {ckpt_model_name}")
+    else:
+        log(f"WARNING: no checkpoint file to register (best_model_path={ckpt_cb.best_model_path!r})")
+
     logger.finalize()
 
     # litlogger's auto-printed URL appends a broken "- vNone" suffix; print a
-    # clean, working link to the experiment instead. logger_name can contain
-    # "/" (see training/README.md, "Grouping experiments"), so it needs the
-    # same URL-encoding litlogger's own link uses, or the link breaks.
+    # clean, working link to the experiment instead. logger_name contains "/"
+    # (see training/README.md, "Grouping experiments"), so it needs the same
+    # URL-encoding litlogger's own link uses, or the link breaks.
     print(
         f"📊 View experiment: "
         f"https://lightning.ai/{teamspace.owner.name}/{teamspace_name}/experiments/"

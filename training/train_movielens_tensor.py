@@ -2,9 +2,13 @@
 
 import argparse
 
+import os
+
 import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint
 from litlogger import LightningLogger
+from litmodels import upload_model
+from recsys.constants import registry_name
 from recsys.movielens_datamodule import MovieLens100K
 from recsys.model import TwoTowerModel
 from lightning_sdk import Studio
@@ -22,18 +26,24 @@ def main():
     parser.add_argument("--max_epochs",    type=int,   default=20,   help="Number of epochs")
     parser.add_argument("--precision",     type=int,   default=32,   choices=[16,32], help="Trainer precision")
     # Logger settings
-    parser.add_argument("--logger_name",   type=str,   default="ml100k-default", help="LitLogger experiment name")
+    parser.add_argument("--logger_name",   type=str,   default="ml-100k/train_movielens_tensor/ml100k-default",
+                        help="LitLogger experiment name; '/' segments become folders")
+    parser.add_argument("--checkpoint_name", type=str, default=None,
+                        help="Model-registry name (default: --logger_name flattened)")
     parser.add_argument("--teamspace",     type=str,   default=Studio().teamspace.name,    help="LitLogger teamspace")
     args = parser.parse_args()
+    if args.checkpoint_name is None:
+        args.checkpoint_name = registry_name(args.logger_name)
 
     # ── 2) LitLogger setup ─────────────────────────────────────────
-    # checkpoint_name pins the registry name to logger_name -- see
-    # train_movielens.py for why the experiment name can't be used.
+    # log_model=False so logger_name can stay nested for folder hierarchy; the
+    # checkpoint is uploaded by hand in step 8 under the flat checkpoint_name.
+    # See train_movielens.py for the full reasoning (and why LightningLogger's
+    # own checkpoint_name= argument does not do this).
     logger = LightningLogger(
         name            = args.logger_name,
         teamspace       = args.teamspace,
-        log_model       = True,
-        checkpoint_name = args.logger_name,
+        log_model       = False,
     )
     # Log any metadata you like
     logger.log_metadata({
@@ -62,8 +72,8 @@ def main():
 
     # ── 5) Checkpoint callback ──────────────────────────────────────
     # No dirpath: checkpoints stage under the logger's run dir (transient) and
-    # litlogger (log_model=True) uploads the best one to the experiment manager,
-    # so nothing accumulates in the studio.
+    # step 8 uploads the best one to the model registry, so nothing accumulates
+    # in the studio.
     ckpt_cb = ModelCheckpoint(
         filename     = "ml100k-{epoch:02d}-{val_acc:.2f}",
         monitor      = "val_acc",
@@ -86,7 +96,19 @@ def main():
     trainer.fit(model, datamodule=dm)
     print("✅ Best checkpoint:", ckpt_cb.best_model_path)
 
-    # ── 8) Finalize logger ─────────────────────────────────────────
+    # ── 8) Publish the best checkpoint, then finalize ──────────────
+    teamspace = Studio().teamspace
+    ckpt_model_name = f"{teamspace.owner.name}/{teamspace.name}/{args.checkpoint_name}"
+    if ckpt_cb.best_model_path and os.path.isfile(ckpt_cb.best_model_path):
+        upload_model(
+            name=ckpt_model_name,
+            model=ckpt_cb.best_model_path,
+            progress_bar=False,
+            verbose=0,
+            metadata={"experiment": args.logger_name},
+        )
+        print(f"✅ Registered checkpoint: {ckpt_model_name}")
+
     logger.finalize()
 
 if __name__ == "__main__":

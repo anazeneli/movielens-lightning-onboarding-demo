@@ -4,25 +4,30 @@
 # own experiment (litlogger has no cross-experiment "version" concept -- see
 # training/README.md, "Grouping experiments").
 #
-# Naming: with log_model=True, litlogger registers the best checkpoint in the
-# model registry *under the experiment name*, recombined as
-# "{owner}/{teamspace}/{name}". The registry uses "/" only as the
-# org/teamspace/model_name delimiter, so the name must be a single flat segment
-# with NO "/". An earlier "{project}/{workflow}/{group}/{experiment}" scheme
-# gave UI folder hierarchy but made the registered model name unparseable
-# (6 slash-parts instead of 3) and blew up the checkpoint upload. Keep it flat
-# and short instead: "{project}-{sweep_id}-lr{lr}-bs{bs}". logger_name ==
-# experiment_name so the serving side (server.py, EXPERIMENT_NAME ->
-# "{owner}/{teamspace}/{experiment_name}") resolves the same string it was
-# registered under. project / workflow / group stay as logged metadata, and
-# runs from one sweep sort together by their shared "{project}-{sweep_id}-"
-# name prefix.
+# Naming: the experiment name is nested --
+# "{project}/{workflow}/{sweep_id}/lr{lr}-bs{bs}" -- and each segment renders as
+# a folder in the experiment manager, so a sweep's runs sit together under one
+# {sweep_id} folder.
+#
+# The model registry can't take that name: it parses "/" as its own
+# owner/teamspace/model_name delimiter, so a nested name arrives as 6 parts
+# instead of 3 and the checkpoint upload dies with "ValueError: Model name must
+# be in the format `organization/teamspace/model_name`". That is why an earlier
+# version of this file had its folders stripped out.
+#
+# So the two names are decoupled: --checkpoint_name carries the flattened
+# ("/" -> "-") form, which is what train_movielens.py registers the checkpoint
+# under and what serving resolves (server.py, EXPERIMENT_NAME ->
+# "{owner}/{teamspace}/{name}"). recsys.constants.registry_name owns the
+# mapping so both ends agree. project / workflow / sweep_id are still logged as
+# metadata too, so the runs stay filterable regardless of the folder view.
 
 import argparse
 import pathlib
 from datetime import datetime
 
 from lightning_sdk import Studio, Job, Machine
+from recsys.constants import registry_name
 
 PROJECT = "ml-100k"
 WORKFLOW = "train_movielens"
@@ -69,12 +74,14 @@ if args.smoke_test:
     job_name = f"sweep-launcher-smoke-test-{timestamp}"
     sweep_id = timestamp
     experiment_group = sweep_id
-    # Flat, slash-free name (see header) -- also what log_model registers under.
-    experiment_name = f"{PROJECT}-{sweep_id}-smoke-test"
+    # Nested name -> folders in the experiment manager; flattened copy for the
+    # model registry, which can't take the slashes (see header).
+    experiment_name = f"{PROJECT}/{WORKFLOW}/{sweep_id}/smoke-test"
     logger_name = experiment_name
+    checkpoint_name = registry_name(experiment_name)
     cmd = (
         f"python {REPO_ROOT}/training/train_movielens.py --smoke_test "
-        f"--logger_name {logger_name} "
+        f"--logger_name {logger_name} --checkpoint_name {checkpoint_name} "
         f"--project {PROJECT} --workflow {WORKFLOW} "
         f"--experiment_group {experiment_group} --experiment_name {experiment_name} "
         f"--sweep_id {sweep_id}"
@@ -97,14 +104,16 @@ grid = [(lr, bs) for lr in learning_rates for bs in batch_sizes]
 print(f"Launching {len(grid)} job(s) on {machine} -- each is billed separately.\n")
 
 for idx, (lr, bs) in enumerate(grid):
-    # Flat, slash-free name (see header) -- also what log_model registers under.
-    # {project}-{sweep_id} groups this sweep's runs by shared prefix; lr + bs
-    # are the only params this grid varies and every combo is unique, so the
-    # full string is a unique experiment_name within the sweep.
-    experiment_name = f"{PROJECT}-{sweep_id}-lr{lr}-bs{bs}"
+    # Nested name (see header): {project}/{workflow}/{sweep_id}/ is the folder
+    # path, lr + bs are the only params this grid varies and every combo is
+    # unique, so the leaf is unique within the sweep's folder.
+    experiment_name = f"{PROJECT}/{WORKFLOW}/{sweep_id}/lr{lr}-bs{bs}"
     logger_name = experiment_name
-    # Job.run's own name -- unrelated to litlogger, just the Jobs UI label.
-    job_name = f"sweep-{experiment_name}"
+    # Flattened copy for the model registry -- the string serving resolves.
+    checkpoint_name = registry_name(experiment_name)
+    # Job.run's own name -- unrelated to litlogger, just the Jobs UI label, and
+    # it has to be flat regardless.
+    job_name = f"sweep-{checkpoint_name}"
 
     cmd      = (
         f"python {REPO_ROOT}/training/train_movielens.py "
@@ -112,7 +121,7 @@ for idx, (lr, bs) in enumerate(grid):
         f"--batch_size {bs} "
         f"--precision 16 "
         f"--max_epochs 25 "
-        f"--logger_name {logger_name} "
+        f"--logger_name {logger_name} --checkpoint_name {checkpoint_name} "
         f"--project {PROJECT} --workflow {WORKFLOW} "
         f"--experiment_group {experiment_group} --experiment_name {experiment_name} "
         f"--sweep_id {sweep_id}"
@@ -126,6 +135,8 @@ for idx, (lr, bs) in enumerate(grid):
 
     print(f"Launched {job_name} → `{cmd}`")
 
-print(f"\nAll {len(grid)} runs share the name prefix '{PROJECT}-{experiment_group}-' "
-      f"in the experiment manager -- filter/sort by it to compare them, pick the best "
-      f"config, then run that config's full training with its own --logger_name.")
+print(f"\nAll {len(grid)} runs land in the experiment manager under the folder "
+      f"'{PROJECT}/{WORKFLOW}/{experiment_group}/' -- compare them there to pick the "
+      f"best config, then run that config's full training with its own --logger_name. "
+      f"Their checkpoints register flattened, as "
+      f"'{PROJECT}-{WORKFLOW}-{experiment_group}-lr<lr>-bs<bs>'.")

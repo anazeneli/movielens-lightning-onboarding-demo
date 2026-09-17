@@ -7,7 +7,7 @@ import litserve as ls
 from litmodels import download_model
 from lightning_sdk import Studio
 from recsys.model import TwoTowerModel
-from recsys.constants import RAW_DATA_DIR
+from recsys.constants import RAW_DATA_DIR, registry_name
 
 def log(msg):
     print(f"[RecSysAPI] {msg}", flush=True)
@@ -21,22 +21,29 @@ def log(msg):
 DEFAULT_CHECKPOINT_NAME = "<owner>/<teamspace>/<experiment-name>"
 
 def _resolve_checkpoint():
-    """Locate a checkpoint uploaded by litlogger (see training/README.md).
+    """Locate a checkpoint uploaded by training (see training/README.md).
 
-    litlogger uploads checkpoints under "{owner}/{teamspace}/{experiment_name}[:version]"
-    (owner/teamspace auto-resolved from Studio().teamspace). Override with
-    CHECKPOINT_NAME for a specific model/version, or EXPERIMENT_NAME to keep the
-    current teamspace but pick a different experiment. With neither set, this
-    falls back to DEFAULT_CHECKPOINT_NAME -- the seeded demo checkpoint, which
-    only exists in the teamspace it was trained in and won't resolve in a
-    fresh teamspace (see the explicit error below).
+    train_movielens.py registers checkpoints under
+    "{owner}/{teamspace}/{checkpoint_name}[:version]" (owner/teamspace
+    auto-resolved from Studio().teamspace). Override with CHECKPOINT_NAME for a
+    specific model/version, or EXPERIMENT_NAME to keep the current teamspace but
+    pick a different experiment. With neither set, this falls back to
+    DEFAULT_CHECKPOINT_NAME -- the seeded demo checkpoint, which only exists in
+    the teamspace it was trained in and won't resolve in a fresh teamspace (see
+    the explicit error below).
+
+    EXPERIMENT_NAME is run through registry_name() because experiment names are
+    nested ("ml-100k/train_movielens/<sweep_id>/lr0.01-bs256") while registry
+    names are the flattened form of the same string -- so you can paste an
+    experiment name straight out of the UI and it resolves. A name that is
+    already flat is unchanged by the mapping.
     """
     model_name = os.environ.get("CHECKPOINT_NAME")
     if not model_name:
         experiment_name = os.environ.get("EXPERIMENT_NAME")
         if experiment_name:
             teamspace = Studio().teamspace
-            model_name = f"{teamspace.owner.name}/{teamspace.name}/{experiment_name}"
+            model_name = f"{teamspace.owner.name}/{teamspace.name}/{registry_name(experiment_name)}"
         else:
             model_name = DEFAULT_CHECKPOINT_NAME
 
