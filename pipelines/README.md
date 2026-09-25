@@ -9,6 +9,7 @@ data-prep (CPU)  ->  train (GPU)  ->  eval (GPU)  ->  serve (deployment)
 
 | File | Purpose |
 |---|---|
+| `prep_train_pipeline.py` | The minimal demo: two steps, `data-prep` (CPU) → `train`. Runs the real `fetch_data.py` + `optimize_data.py`, then `train_movielens.py` against the output. Start here. |
 | `lifecycle_pipeline.py` | Builds and launches the four-step pipeline. Each step picks its own machine; `--cron` attaches a native schedule; `--serve_studio` / `--serve_image` let the serving step come from a different repo or environment. |
 | `batch_inference_pipeline.py` | One step plus a `Schedule` — daily/recurring scoring over all users. Separate from the lifecycle pipeline because it has a different trigger and cadence. |
 
@@ -20,7 +21,25 @@ data-prep (CPU)  ->  train (GPU)  ->  eval (GPU)  ->  serve (deployment)
 > the Drive. See [`serving/batch_inference.py`](../serving/batch_inference.py)
 > for the pattern.
 
-Run it:
+Run the two-step demo:
+
+```bash
+python pipelines/prep_train_pipeline.py --smoke_test   # 1 epoch / 2 batches, verifies the path
+python pipelines/prep_train_pipeline.py                # 5 epochs on CPU
+python pipelines/prep_train_pipeline.py --train_machine L4 --max_epochs 20
+```
+
+The two steps run on separate machines and share no disk. `data-prep` writes to
+the teamspace drive (`/teamspace/lightning_storage/data/`), which `train` reads,
+so that folder must exist first (see the root `CLAUDE.md`). `data-prep` is
+idempotent: once the drive is populated it prints "nothing to do" and `train`
+starts right away.
+
+Check a step's logs for `Smoke test passed` / `Best checkpoint`, not only the job
+status. A training script that crashed with a traceback has still been observed
+to report `Completed`.
+
+Run the full lifecycle:
 
 ```bash
 python pipelines/lifecycle_pipeline.py                          # on-demand, T4 throughout
