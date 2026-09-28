@@ -3,8 +3,8 @@
 # Launch train_movielens.py as a single remote job with arbitrary
 # hyperparameters -- e.g. a longer run on a sweep's winning config (see
 # README.md, "Smoke test locally, then experiment", step 4). Not part of a
-# sweep: no --experiment_group is set, so this lands as its own flat
-# experiment, not inside the sweep's folder.
+# sweep: no --experiment_group is set, so this lands as its own experiment,
+# outside any sweep's name prefix.
 #
 # Anchored to this file's own location (not the caller's cwd) so it can be
 # run from anywhere -- see training/README.md, "Grouping experiments" for why

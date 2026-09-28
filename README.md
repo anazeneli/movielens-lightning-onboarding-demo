@@ -118,23 +118,17 @@ resolution details.
 
 ## Experiment organization
 
-Each launched job is its own LitLogger experiment. With `log_model=True`,
-litlogger registers the best checkpoint in the model registry *under the
-experiment name*, recombined as `{owner}/{teamspace}/{name}`. The registry
-uses `/` only as the `owner/teamspace/model_name` delimiter, so the name must
-be a single flat segment with **no `/`** — an earlier slash-delimited scheme
-gave UI folder hierarchy but produced an unparseable model name (too many
-slash-parts) and broke checkpoint upload. `--logger_name` is a flat, short
-string instead:
+Each launched job is its own LitLogger experiment. There are no folders: runs
+are grouped by a shared name prefix, broad to narrow.
 
 ```text
---logger_name = {project}-{sweep_id}-lr{lr}-bs{bs}
-       example = ml-100k-20260706-192010-lr0.01-bs256
+{project}-{sweep_id}-lr{lr}-bs{bs}
+ml-100k-20260706-192010-lr0.01-bs256
 ```
 
-`sweep_launcher.py` generates the `sweep_id` (one per sweep invocation), so all
-of a sweep's runs share the `{project}-{sweep_id}-` prefix — filter/sort by it
-in the experiment manager to compare them. `logger_name == experiment_name`, so
+Filter by `ml-100k-` for the whole project, or `ml-100k-<sweep_id>-` for one
+sweep. The name can't contain `/`: the checkpoint is registered as
+`{owner}/{teamspace}/{name}`, and a slash breaks that upload. `logger_name == experiment_name`, so
 serving resolves the exact string the checkpoint was registered under (see
 `serving/server.py`). `train_movielens.py` never hardcodes any of this — run it
 standalone and it defaults to a flat `run-lr<lr>-bs<batch_size>` name. Full
