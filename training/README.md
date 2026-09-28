@@ -8,7 +8,7 @@ Everything needed to train the two-tower model and run hyperparameter sweeps.
 | `optimize_data.py` | **One-time step.** Converts the raw MovieLens ratings into LitData's streamable chunk format on the shared drive. See "Data pipeline: LitData" below. |
 | `train_movielens.py` | **Main train script.** litlogger + `ModelCheckpoint` (monitors `val_ap`) + `EarlyStopping`. |
 | `train_movielens_tensor.py` | Near-duplicate variant that monitors `val_acc` and has no early stopping. |
-| `sweep_launcher.py` | Fans out a `lr × batch_size` grid as Lightning **jobs** (`Machine.T4` by default, `--machine` to override); each job is its own experiment, and a sweep's jobs share one name prefix in the experiment manager (see "Grouping experiments" below). `--smoke_test` launches a single job instead of the full grid, to verify the remote path first. |
+| `sweep_launcher.py` | Fans out a `lr × batch_size` grid as Lightning **jobs** (`Machine.CPU` by default, swap for whatever fits your budget); each job is its own experiment, grouped into one folder in the experiment manager (see "Grouping experiments" below). `--smoke_test` launches a single job instead of the full grid, to verify the remote path first. |
 | `launch_job.py` | Launches a **single** remote job running `train_movielens.py` with whatever hyperparameters you give it -- e.g. a longer run on a sweep's winning config. Anchored to its own file location, so it works from any cwd (unlike a one-off `Path(".").resolve()` snippet). |
 
 First-time setup (from the repo root), then train locally:
@@ -156,26 +156,28 @@ survive.
 
 ## Grouping experiments
 
-The experiment manager has **no folders**. Runs are grouped by a shared,
-hyphen-delimited **name prefix**, and each name is a single segment:
+litlogger's public API only documents a flat `name` -- no `folder`/`group`
+parameter. An earlier version abused a **slash-delimited `--logger_name`** to
+fake folder hierarchy in the UI, but with `log_model=True` litlogger registers
+the best checkpoint in the model registry *under the experiment name*,
+recombined as `{owner}/{teamspace}/{name}`. The registry uses `/` only as the
+`owner/teamspace/model_name` delimiter, so a multi-slash name is unparseable
+and the checkpoint upload fails:
 
 ```text
-{project}-{sweep_id}-lr{lr}-bs{bs}
-ml-100k-20260706-192010-lr0.01-bs256
-└──┬──┘ └──────┬──────┘ └────┬────┘
-project     one sweep     this run
+ValueError: Model name must be in the format `organization/teamspace/model_name`
 ```
 
-Read it left to right, broad to narrow: filter by `ml-100k-` for everything in
-the project, by `ml-100k-20260706-192010-` for one sweep.
+So `--logger_name` is now a single flat, hyphen-delimited segment; grouping is
+by shared **name prefix** instead of folders:
 
-**Why not `/` folders:** with `log_model=True` the checkpoint is registered
-under the experiment name as `{owner}/{teamspace}/{name}`. The registry treats
-`/` as that delimiter, so a slashed name fails the upload with
-`ValueError: Model name must be in the format 'organization/teamspace/model_name'`.
+```text
+--logger_name = {project}-{sweep_id}-lr{lr}-bs{bs}
+       example = ml-100k-20260706-192010-lr0.01-bs256
+```
 
-Each piece is also logged as its own metadata field, so runs stay filterable
-without parsing the name:
+`sweep_launcher.py` still passes each piece down as its own CLI flag, logged as
+metadata -- so everything stays filterable/searchable regardless of the name:
 
 | Flag | Meaning | Example |
 |---|---|---|

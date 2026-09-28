@@ -58,9 +58,7 @@ These are all load-bearing. Each one was learned by breaking it.
 recombined as `{owner}/{teamspace}/{name}`. The registry uses `/` only as its own
 delimiter, so a slashed name is unparseable and the checkpoint upload fails with
 `ValueError: Model name must be in the format 'organization/teamspace/model_name'`.
-The experiment manager has no folders. Group runs by shared **name prefix**,
-broad to narrow: `{project}-{sweep_id}-lr{lr}-bs{bs}`, e.g.
-`ml-100k-20260706-192010-lr0.01-bs256`.
+Group runs by shared **name prefix**, not by folder hierarchy.
 
 **Remote jobs run with cwd = studio root, not the repo.** Any path handed to a
 job must be absolute. Both `training/sweep_launcher.py` and
