@@ -129,6 +129,13 @@ def main():
              "(or run-smoke-test for --smoke_test); sweep_launcher.py overrides this with "
              "its own sweep-* naming.",
     )
+    parser.add_argument(
+        "--experiment_folder", type=str, default="",
+        help="Folder path in the experiment manager, e.g. ml-100k/<sweep_id> -- each "
+             "'/' is a folder level. The experiment is created as "
+             "<folder>/<logger_name>; the checkpoint registry name stays the flat "
+             "--logger_name (the registry can't take extra '/').",
+    )
     # Grouping metadata -- sweep_launcher.py sets these so many experiments can
     # be filtered/compared as one sweep; this script just logs whatever it's given.
     parser.add_argument("--project", type=str, default="ml-100k")
@@ -174,8 +181,12 @@ def main():
     # checkpoint registers under the *experiment* name, which the platform
     # timestamps on creation (ml100k-best -> ml100k-best-2026-09-14T15-24-53.766+00-00),
     # so serving could never reconstruct the name it was stored under.
+    experiment_path = (
+        f"{args.experiment_folder.strip('/')}/{args.logger_name}"
+        if args.experiment_folder else args.logger_name
+    )
     logger = LightningLogger(
-        name=args.logger_name,
+        name=experiment_path,
         teamspace=teamspace_name,
         log_model=True,
         checkpoint_name=args.logger_name,
@@ -273,13 +284,13 @@ def main():
     logger.finalize()
 
     # litlogger's auto-printed URL appends a broken "- vNone" suffix; print a
-    # clean, working link to the experiment instead. logger_name can contain
-    # "/" (see training/README.md, "Grouping experiments"), so it needs the
+    # clean, working link to the experiment instead. experiment_path contains
+    # "/" when --experiment_folder is set, so it needs the
     # same URL-encoding litlogger's own link uses, or the link breaks.
     print(
         f"📊 View experiment: "
         f"https://lightning.ai/{teamspace.owner.name}/{teamspace_name}/experiments/"
-        f"{quote(args.logger_name, safe='')}"
+        f"{quote(experiment_path, safe='')}"
     )
     if args.smoke_test:
         print("✅ Smoke test passed -- litlogger experiment and checkpoint upload verified.")

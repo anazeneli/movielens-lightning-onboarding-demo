@@ -53,12 +53,16 @@ teamspace-scoped, so a duplicate inside the same teamspace needs none of this.
 
 These are all load-bearing. Each one was learned by breaking it.
 
-**Experiment names must be a single flat segment with no `/`.** With
-`log_model=True`, litlogger registers the checkpoint under the experiment name,
-recombined as `{owner}/{teamspace}/{name}`. The registry uses `/` only as its own
-delimiter, so a slashed name is unparseable and the checkpoint upload fails with
+**Experiments go in folders; checkpoint names stay flat.** Each `/` in the
+litlogger experiment name is a folder in the experiment manager, so a sweep lands
+as `ml-100k/<sweep_id>/<run>` (`--experiment_folder`). The *model registry* name
+is a different string and must stay a single flat segment: the registry uses `/`
+only as its `{owner}/{teamspace}/{name}` delimiter, and a slashed registry name
+fails the upload with
 `ValueError: Model name must be in the format 'organization/teamspace/model_name'`.
-Group runs by shared **name prefix**, not by folder hierarchy.
+That error is why names were once flattened entirely. `checkpoint_name=` (below)
+keeps the two apart. Verified 2026-09-28: a sweep shows as folders in the UI and
+each checkpoint downloads by its flat name.
 
 **Remote jobs run with cwd = studio root, not the repo.** Any path handed to a
 job must be absolute. Both `training/sweep_launcher.py` and
@@ -80,7 +84,8 @@ no client change removes it, and the bare name does not resolve. That used to
 make the registered checkpoint unfindable by name. Both train scripts now pass
 `checkpoint_name=args.logger_name` to `LightningLogger`, which pins the *model
 registry* name to the flat name you chose, so `EXPERIMENT_NAME=ml100k-best`
-resolves in serving. Drop that argument and serving breaks. To find an
+resolves in serving. Drop that argument and serving breaks, and a foldered
+experiment name would then be used as the registry name and fail the upload. To find an
 experiment's real stored name, list it — don't reconstruct it.
 
 **Jobs can't write into the live Studio filesystem.** A studio job's outputs go
