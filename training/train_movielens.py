@@ -185,11 +185,27 @@ def main():
         f"{args.experiment_folder.strip('/')}/{args.logger_name}"
         if args.experiment_folder else args.logger_name
     )
+    # Two non-default flags here, both working around litlogger teardown bugs
+    # that otherwise make every run fail or hang *after* training succeeds.
+    #
+    # save_logs=False: the default True makes litlogger re-exec the whole script
+    #   under a PTY to capture the console, then upload the transcript at
+    #   finalize(). That upload gets a 501 from the artifact endpoint and
+    #   litlogger's backoff retries it forever, so trainer.fit() never returns.
+    #
+    # log_model=False: the default True registers the checkpoint at finalize()
+    #   with version=<global_step> pinned explicitly. Re-registering a
+    #   (name, version) pair that already exists 500s -- and --smoke_test always
+    #   stops at step 2, so the second smoke test under a given name fails
+    #   forever. Step 7 below uploads the checkpoint itself, letting the
+    #   registry auto-increment the version, which is what
+    #   PushCheckpointMidRun already does.
     logger = LightningLogger(
         name=experiment_path,
         teamspace=teamspace_name,
-        log_model=True,
+        log_model=False,
         checkpoint_name=args.logger_name,
+        save_logs=False,
     )
 
     # Log metadata
@@ -280,7 +296,30 @@ def main():
     trainer.fit(model, datamodule=dm)
     print("✅ Best checkpoint:", ckpt_cb.best_model_path)
 
-    # ── 7) Finalize logger ─────────────────────────────────────────
+    # ── 7) Register the final checkpoint ───────────────────────────
+    # Done here rather than via log_model=True so the registry assigns the next
+    # version itself (see the logger comment above). Same name serving resolves:
+    # {owner}/{teamspace}/{logger_name}, latest version when none is given.
+    final_model_name = f"{teamspace.owner.name}/{teamspace_name}/{args.logger_name}"
+    if ckpt_cb.best_model_path and os.path.isfile(ckpt_cb.best_model_path):
+        score = ckpt_cb.best_model_score
+        upload_model(
+            name=final_model_name,
+            model=ckpt_cb.best_model_path,
+            progress_bar=False,
+            verbose=0,
+            metadata={
+                "epoch": str(trainer.current_epoch),
+                "monitor": str(ckpt_cb.monitor),
+                "best_score": f"{float(score):.4f}" if score is not None else "n/a",
+                "smoke_test": str(args.smoke_test),
+            },
+        )
+        log(f"registered checkpoint -> {final_model_name}")
+    else:
+        log("WARNING: no checkpoint to register -- did validation run?")
+
+    # ── 8) Finalize logger ─────────────────────────────────────────
     logger.finalize()
 
     # litlogger's auto-printed URL appends a broken "- vNone" suffix; print a

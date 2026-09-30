@@ -9,6 +9,7 @@ Everything needed to train the two-tower model and run hyperparameter sweeps.
 | `train_movielens.py` | **Main train script.** litlogger + `ModelCheckpoint` (monitors `val_ap`) + `EarlyStopping`. |
 | `train_movielens_tensor.py` | Near-duplicate variant that monitors `val_acc` and has no early stopping. |
 | `sweep_launcher.py` | Fans out a `lr × batch_size` grid as Lightning **jobs** (`Machine.T4` by default; `--machine` to change it); each job is its own experiment, grouped into one folder in the experiment manager (see "Grouping experiments" below). `--smoke_test` launches a single job instead of the full grid, to verify the remote path first. |
+| `smoke_test_job.py` | **Job smoke test.** Runs `train_movielens.py --smoke_test` as a remote Job, waits for it, and exits non-zero unless the remote log contains `Smoke test passed`. Proves the *Job* path works, which the local smoke test cannot: a job gets a fresh machine, `cwd` = studio root, and the drive over the network. `--machine` (default CPU), `--no_wait`, `--keep`. |
 | `launch_job.py` | Launches a **single** remote job running `train_movielens.py` with whatever hyperparameters you give it -- e.g. a longer run on a sweep's winning config. Anchored to its own file location, so it works from any cwd (unlike a one-off `Path(".").resolve()` snippet). |
 
 First-time setup (from the repo root), then train locally:
@@ -19,6 +20,24 @@ python training/fetch_data.py                                           # one-ti
 python training/optimize_data.py                                        # one-time, builds the LitData copy
 python training/train_movielens.py --lr 1e-2 --batch_size 256 --max_epochs 20
 ```
+
+Or `bash setup_studio.sh` from the repo root, which does all of the above (and
+creates the teamspace drive folder if it's missing). Add `--with-job` to also
+run `smoke_test_job.py`, which is what catches setup that only works locally:
+
+```bash
+python training/train_movielens.py --smoke_test   # local: ~30s
+python training/smoke_test_job.py                 # remote Job: ~4min, billed
+```
+
+> **Don't re-enable litlogger's `log_model` or `save_logs`.** Both default to
+> `True` and both break at teardown, *after* training has succeeded:
+> `save_logs=True` retries a failing console-log upload forever, so `fit()`
+> never returns; `log_model=True` pins the registry version to the global step,
+> and re-registering an existing `(name, version)` pair returns a 500 -- which
+> made every repeat `--smoke_test` fail, since it always stops at step 2. The
+> scripts upload the final checkpoint themselves with `litmodels.upload_model`
+> and no `version=`, so the registry assigns the next version.
 
 Run the sweep (remote jobs) -- smoke test the remote path first, then run the full grid:
 

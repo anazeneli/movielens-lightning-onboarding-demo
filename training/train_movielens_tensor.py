@@ -1,10 +1,12 @@
 # train_movielens.py
 
 import argparse
+import os
 
 import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint
 from litlogger import LightningLogger
+from litmodels import upload_model
 from recsys.movielens_datamodule import MovieLens100K
 from recsys.model import TwoTowerModel
 from lightning_sdk import Studio
@@ -32,8 +34,13 @@ def main():
     logger = LightningLogger(
         name            = args.logger_name,
         teamspace       = args.teamspace,
-        log_model       = True,
+        # Both flags work around litlogger teardown bugs -- see the long
+        # comment in train_movielens.py. log_model=True pins the registry
+        # version to the global step and 500s when that version already
+        # exists; save_logs=True hangs finalize() on a 501 retry loop.
+        log_model       = False,
         checkpoint_name = args.logger_name,
+        save_logs       = False,
     )
     # Log any metadata you like
     logger.log_metadata({
@@ -85,6 +92,16 @@ def main():
     # ── 7) Fit! ─────────────────────────────────────────────────────
     trainer.fit(model, datamodule=dm)
     print("✅ Best checkpoint:", ckpt_cb.best_model_path)
+
+    # Registered here, not via log_model=True, so the registry picks the next
+    # version itself -- see the logger comment above.
+    if ckpt_cb.best_model_path and os.path.isfile(ckpt_cb.best_model_path):
+        # The registry needs the full {owner}/{teamspace}/{name} form; a bare
+        # name fails with "Model name must be in the format ...".
+        model_name = f"{Studio().teamspace.owner.name}/{args.teamspace}/{args.logger_name}"
+        upload_model(name=model_name, model=ckpt_cb.best_model_path,
+                     progress_bar=False, verbose=0)
+        print(f"[train] registered checkpoint -> {model_name}")
 
     # ── 8) Finalize logger ─────────────────────────────────────────
     logger.finalize()

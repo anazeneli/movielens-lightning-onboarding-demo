@@ -5,23 +5,33 @@
 # teamspace data folder exists and is mounted, fetches + optimizes MovieLens,
 # then runs the smoke test. Every step is idempotent, so re-running is safe.
 #
+# The remote-Job smoke test is opt-in (--with-job) because it bills compute.
+#
 #     bash setup_studio.sh               # full setup
 #     bash setup_studio.sh --skip-smoke  # everything except the smoke test
+#     bash setup_studio.sh --with-job    # also smoke test the remote Job path
 #
 # The data folder step is the one fetch_data.py can't do for itself:
 # /teamspace/lightning_storage/ is not writable, only its mounted subfolders
-# are, so the folder has to be created through the SDK (see CLAUDE.md).
+# are, so the folder has to be created through the SDK (see README.md).
 
 set -euo pipefail
 cd "$(dirname "$0")"
 
 SKIP_SMOKE=0
-[[ "${1:-}" == "--skip-smoke" ]] && SKIP_SMOKE=1
+WITH_JOB=0
+for arg in "$@"; do
+    case "$arg" in
+        --skip-smoke) SKIP_SMOKE=1 ;;
+        --with-job)   WITH_JOB=1 ;;
+        *) echo "unknown option: $arg (expected --skip-smoke and/or --with-job)" >&2; exit 2 ;;
+    esac
+done
 
-echo "==> [1/5] Installing recsys + deps"
+echo "==> [1/6] Installing recsys + deps"
 pip install -q -e .
 
-echo "==> [2/5] Ensuring the teamspace data folder is mounted"
+echo "==> [2/6] Ensuring the teamspace data folder is mounted"
 python - <<'EOF'
 import os, sys, time, warnings
 warnings.filterwarnings("ignore")  # lightning-sdk's "newer version" nag
@@ -63,17 +73,28 @@ sys.exit(f"    Folder(s) {missing} created but not mounted under {MOUNT_ROOT} af
          f"MOVIELENS_DATA_DIR / MOVIELENS_LITDATA_DIR and re-run.")
 EOF
 
-echo "==> [3/5] Fetching raw MovieLens 100K"
+echo "==> [3/6] Fetching raw MovieLens 100K"
 python training/fetch_data.py
 
-echo "==> [4/5] Building LitData-optimized copy"
+echo "==> [4/6] Building LitData-optimized copy"
 python training/optimize_data.py
 
 if [[ $SKIP_SMOKE -eq 1 ]]; then
-    echo "==> [5/5] Smoke test skipped"
+    echo "==> [5/6] Local smoke test skipped"
 else
-    echo "==> [5/5] Running smoke test"
+    echo "==> [5/6] Running local smoke test"
     python training/train_movielens.py --smoke_test
+fi
+
+# Opt-in: the local smoke test proves the code runs here, not that it runs as a
+# remote Job -- a fresh machine, cwd = studio root, drive over the network. This
+# launches one short CPU job and waits for it. Costs a few minutes of compute,
+# so it's off by default.
+if [[ $WITH_JOB -eq 1 ]]; then
+    echo "==> [6/6] Running remote job smoke test"
+    python training/smoke_test_job.py
+else
+    echo "==> [6/6] Remote job smoke test skipped (pass --with-job to run it)"
 fi
 
 echo "==> Setup complete."

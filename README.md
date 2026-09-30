@@ -120,9 +120,15 @@ studio-specific.
 
 ```bash
 python training/train_movielens.py --smoke_test   # 1) local smoke test
-python training/sweep_launcher.py --smoke_test    # 2) remote smoke test (one job, real grouping)
-python training/sweep_launcher.py                 # 3) full sweep, lands in its own ml-100k/<sweep_id>/ folder
+python training/smoke_test_job.py                 # 2) remote smoke test -- waits, checks the log, exits non-zero on failure
+python training/sweep_launcher.py --smoke_test    # 3) one sweep job (real grouping; launches and returns)
+python training/sweep_launcher.py                 # 4) full sweep, lands in its own ml-100k/<sweep_id>/ folder
 ```
+
+Step 2 is worth its few minutes before any sweep: a Job runs on a fresh machine
+with `cwd` = studio root and the drive over the network, so it catches the setup
+problems a local run can't -- an absolute path that only exists here, data left
+on local disk, a package the job machine lacks.
 
 Pick the best config from that sweep's folder in the experiment manager, then use
 `training/launch_job.py` to run it longer as its own remote job -- it's
@@ -132,14 +138,14 @@ you run it from (unlike a one-off snippet using the repo-root-relative
 you run it):
 
 ```bash
-# 4) longer run on the winning config
+# 5) longer run on the winning config
 python training/launch_job.py \
     --lr <best_lr> --batch_size <best_batch_size> --max_epochs 100 \
     --logger_name ml100k-best --machine H100
 ```
 
 ```bash
-# 5) serve the result
+# 6) serve the result
 EXPERIMENT_NAME=ml100k-best python serving/server.py   # LitServe API on :8011
 streamlit run serving/app.py                            # UI that calls it
 ```
