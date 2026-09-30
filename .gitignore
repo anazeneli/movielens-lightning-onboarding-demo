@@ -10,7 +10,7 @@
 !.gitignore
 !.lightningignore
 !README.md
-!CLAUDE.md
+!setup_studio.sh
 !pyproject.toml
 !recsys/
 !training/
@@ -34,6 +34,9 @@ checkpoints/
 
 # Never these, no matter where they appear
 .claude/
+CLAUDE.md
+skills-lock.json
+.agents/
 .claude.json
 .env
 .env.*

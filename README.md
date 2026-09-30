@@ -24,6 +24,27 @@ resolves everywhere — see `pyproject.toml`.
 
 ## Onboarding
 
+### Fresh setup vs. duplicated Studio
+
+What you need to do depends on where your Studio came from. Setup has two
+parts: the **environment** (installed packages), which belongs to one Studio,
+and the **data** on the drive, which the whole teamspace shares.
+
+| Your Studio is... | Environment | Data on the drive | What to run |
+|---|---|---|---|
+| **A duplicate of this Studio, in the same teamspace** | Copied with the Studio | Already there | Nothing, if the Studio you copied was already set up. Run `bash setup_studio.sh` to check; it skips finished steps and runs the smoke test |
+| **A duplicate, moved to a different teamspace** | Copied with the Studio | Missing: the drive belongs to the old teamspace | `bash setup_studio.sh` |
+| **A fresh Studio with a git clone** | Missing | Already there if someone in this teamspace set it up | `bash setup_studio.sh` |
+| **The first Studio in a new teamspace** | Missing | Missing | `bash setup_studio.sh` |
+
+When in doubt, run `bash setup_studio.sh`. Every step checks what's already
+done, so running it again is safe and only does the missing work. On a brand-new
+teamspace it also creates the teamspace `data` folder on the drive.
+`fetch_data.py` can't do this on its own, and without the folder it fails with
+`PermissionError: ... '/teamspace/lightning_storage'`.
+
+The sections below explain each part in more detail.
+
 ### 1. Connect to your data — the shared drive, not local
 
 Raw MovieLens files live on the teamspace's shared **Drive**, not in this
@@ -44,7 +65,26 @@ input is missing, rather than silently fetching data on a remote job machine.
 We recommend storing even small datasets like this one on the shared drive
 rather than locally, so every Studio and remote job in the teamspace can use
 it without separate setup.
-If the raw data isn't already on the drive:
+If the raw data isn't already on the drive, run the setup script. It creates
+the teamspace `data` folder if it's missing, waits for it to mount, fetches and
+optimizes the data, then runs the smoke test:
+
+```bash
+bash setup_studio.sh
+```
+
+Or do it by hand. First make sure the teamspace `data` folder exists:
+`/teamspace/lightning_storage/` itself is **not writable**, only its mounted
+subfolders are. If `ls /teamspace/lightning_storage/data` fails, create the
+folder (it mounts within ~60s, no Studio restart needed):
+
+```python
+from lightning_sdk import Teamspace
+Teamspace(name="<teamspace>", org="<owner>").new_folder("data")
+```
+
+The mount root is `lightning_storage`, not the `folders` that `new_folder`'s
+docstring claims. Then run the data steps:
 
 ```bash
 python training/fetch_data.py       # downloads ml-100k, but only if not already there
@@ -67,8 +107,8 @@ Either gets you the code; pick whichever fits:
   cd movielens-lightning-onboarding-demo
   pip install -e .   # installs `recsys` in editable mode
   ```
-  Run this in a **duplicated Studio too**, not just a fresh clone — it also
-  upgrades `litlogger` past the stale version some base images ship, which
+  Also run this in a **duplicated Studio** if the Studio you copied never ran
+  it (`bash setup_studio.sh` covers both cases) — it also upgrades `litlogger` past the stale version some base images ship, which
   otherwise kills every run (local and remote) at `trainer.fit`. Everything
   else — lightning, torch, litdata, litserve, streamlit — comes from the
   standard Lightning Studio base image.

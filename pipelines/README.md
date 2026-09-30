@@ -31,7 +31,7 @@ python pipelines/prep_train_pipeline.py --train_machine L4 --max_epochs 20
 
 The two steps run on separate machines and share no disk. `data-prep` writes to
 the teamspace drive (`/teamspace/lightning_storage/data/`), which `train` reads,
-so that folder must exist first (see the root `CLAUDE.md`). `data-prep` is
+so that folder must exist first (see the root `README.md`, or just run `bash setup_studio.sh`). `data-prep` is
 idempotent: once the drive is populated it prints "nothing to do" and `train`
 starts right away.
 
